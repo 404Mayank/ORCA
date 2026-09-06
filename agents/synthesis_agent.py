@@ -326,6 +326,8 @@ def build_recommendation(
         return _build_geofence(result, intent, turn_id)
     if intent.query_type is QueryType.CAUSAL_EXPLAIN:
         return _build_causal(result, intent, turn_id)
+    if intent.query_type is QueryType.CONDITIONS_REPORT:
+        return _build_conditions(result, intent, turn_id)
 
     vessel_class = (intent.vessel_class or VesselClass.FRP_9M).value
     risk = result.output_for("s6")
@@ -1059,6 +1061,102 @@ def _build_causal(result: ExecutionResult, intent: Intent, turn_id: str) -> Reco
         visual_layers=[
             VisualLayer(id="chl_anomaly", type="raster", ref=chl_id)
         ] if chl_id else [],
+        reasoning_trace=result.trace,
+        degraded=result.degraded,
+        degradation_notes=result.degradation_notes,
+    )
+
+
+def _build_conditions(result: ExecutionResult, intent: Intent, turn_id: str) -> Recommendation:
+    """Tide, weather and alert status for a place. A report, not advice.
+
+    No verdict, no drivers, no window, no guidance: every one of those would
+    be adjudication, and this query type exists precisely for questions asked
+    without a vessel class. Waves and wind are OBSERVED claims (verifier must
+    match them); tide and alerts arrive through _negative_findings, the same
+    helper the safety path uses, which is why the fallback plan keeps the
+    safety step numbering (s4 tides, s5 alerts).
+    """
+    wave = _first_output(result, "wave_forecast")
+    if wave is None:
+        return _no_data_answer(
+            QueryType.CONDITIONS_REPORT, turn_id, result,
+            "Could not read conditions - the wave forecast did not return.",
+        )
+    wave_id = _first_call_id(result, "wave_forecast")
+    wind_id = _first_call_id(result, "wind_forecast")
+
+    claims: list[Claim] = [
+        Claim(
+            id="c1",
+            kind=ClaimKind.OBSERVED,
+            template="Waves {min}-{max} {unit}.",
+            slots={
+                "min": round(wave.significant_wave_height.min, 2),
+                "max": round(wave.significant_wave_height.max, 2),
+                "unit": "m",
+            },
+            evidence=[wave_id] if wave_id else [],
+        )
+    ]
+    wind = _first_output(result, "wind_forecast")
+    if wind is not None and wind_id:
+        claims.append(
+            Claim(
+                id="c2",
+                kind=ClaimKind.OBSERVED,
+                template="Wind {min}-{max} {unit}.",
+                slots={
+                    "min": round(wind.wind_speed.min, 2),
+                    "max": round(wind.wind_speed.max, 2),
+                    "unit": "kn",
+                },
+                evidence=[wind_id],
+            )
+        )
+
+    place_name = intent.spatial_reference.name if intent.spatial_reference else "the coast"
+    caveats = _place_caveat(result) + [
+        Caveat(
+            text=(
+                "This is a conditions report, not a safety assessment. It "
+                "carries no verdict; ask whether it is safe to go out, naming "
+                "your boat, before departing."
+            )
+        )
+    ]
+
+    quality_notes = [
+        f"{e.tool} {e.source}"
+        + (f", {e.data_age_days:.1f} days old" if e.data_age_days else "")
+        for e in _evidence_entries(result)
+        if e.status == "ok"
+    ]
+
+    return Recommendation(
+        query_type=QueryType.CONDITIONS_REPORT,
+        turn_id=turn_id,
+        generated_at=datetime.now(IST),
+        # No verdict. See the note at the top of this builder.
+        headline=Templated(template=f"Conditions near {place_name}.", slots={"place": place_name}),
+        claims=claims,
+        negative_findings=_negative_findings(result),
+        spatial_context=_spatial_from_place(result, intent),
+        confidence=Confidence(
+            overall=0.3 if result.degraded else 0.6,
+            by_claim={c.id: 0.6 for c in claims},
+            basis="; ".join(quality_notes) or "No successful data source.",
+        ),
+        caveats=caveats,
+        evidence=_evidence_entries(result),
+        visual_layers=[
+            VisualLayer(id="origin", type="point", ref=result.call_id_for("s1"))
+            if result.call_id_for("s1")
+            else None,
+            VisualLayer(id="wave_24h", type="timeseries", ref=wave_id)
+            if wave_id
+            else None,
+        ],
         reasoning_trace=result.trace,
         degraded=result.degraded,
         degradation_notes=result.degradation_notes,

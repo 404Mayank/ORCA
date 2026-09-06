@@ -129,7 +129,7 @@ One LLM call returns two things: the **intent** (query type, place, time window,
 vessel class) and the **plan** (a DAG of tool calls). It does not answer the
 question. It arranges the calculation.
 
-**Four query types, and only four:**
+**Five query types:**
 
 | type | the user is asking |
 |---|---|
@@ -137,6 +137,7 @@ question. It arranges the calculation.
 | `pfz_locate` | where is the nearest good fishing zone |
 | `geofence_check` | which waters must be avoided |
 | `causal_explain` | why has the catch fallen off |
+| `conditions_report` | tide, weather and alert status at a place — read-only, no verdict |
 
 **Slots.** `spatial_reference`, `time_window`, `vessel_class`. The model may fill
 `spatial_reference.name` — the *word* the user said. It may **not** fill `lat` or
@@ -144,7 +145,9 @@ question. It arranges the calculation.
 
 For `safety_assess`, place and vessel are both required. Missing either produces
 a **clarification**, never a guess, because the vessel class selects the
-thresholds the verdict comes from.
+thresholds the verdict comes from. For `conditions_report`, place alone is
+required; vessel is never asked for, and safety phrasing re-routes to
+`safety_assess` (Gate 1a) so the vessel gate cannot be bypassed.
 
 **Gates applied after the model answers**, in code:
 
@@ -155,7 +158,10 @@ thresholds the verdict comes from.
   checks. There is nothing to gate: no tool will run and no number claimed.
 - **Gate 1** — missing safety-critical slot → forced clarification, whatever
   state the model returned.
-- **Gate 1b** — the model may not declare one of the four types out of scope.
+- **Gate 1a** — the reporting/advising fence. A `conditions_report` intent
+  with safety-decisive phrasing in the raw query is rewritten to
+  `safety_assess` before Gate 1, so the vessel gate fires on it.
+- **Gate 1b** — the model may not declare one of the five types out of scope.
   When it does, the reason is ours, and the refusal says so honestly.
 
 **Fallback tiers**, in decreasing confidence:

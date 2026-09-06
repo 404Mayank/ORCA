@@ -20,11 +20,14 @@ The architecture is region-agnostic; only the data cache is scoped.
 **Target grid:** 0.05° regular lat/lon, EPSG:4326. 81 lats × 71 lons.
 Everything is regridded onto this at ingest time.
 
-**Queries (four only):**
+**Queries (five):**
 1. `pfz_locate` — where is the nearest Potential Fishing Zone today
 2. `safety_assess` — is it safe to venture out tomorrow morning
 3. `geofence_check` — which zones must be avoided
 4. `causal_explain` — why has fish productivity declined here
+5. `conditions_report` — tide, weather and alert status at a place. Read-only:
+   no verdict, no vessel gate. Any safety phrasing (safe/safest/venture/go
+   out) routes to `safety_assess` in code, never here.
 
 **Language:** English only in phase one. The language adapter exists as a
 pass-through stub so Tamil is a one-adapter change later. Do not delete it.

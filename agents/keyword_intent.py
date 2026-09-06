@@ -52,7 +52,7 @@ MIN_SCORE = 2
 #: while "today" settles nothing.
 _TERMS: dict[QueryType, dict[str, int]] = {
     QueryType.SAFETY_ASSESS: {
-        "safe": 2, "safety": 2, "danger": 2, "dangerous": 2, "risk": 2,
+        "safe": 2, "safety": 2, "safest": 2, "danger": 2, "dangerous": 2, "risk": 2,
         "cyclone": 3, "storm": 2, "warning": 2, "alert": 2, "rough": 2,
         "venture": 2, "go out": 2, "going out": 2, "head out": 2, "sail": 1,
         "sea": 1, "weather": 1, "wave": 1, "waves": 1, "wind": 1, "tomorrow": 1,
@@ -73,6 +73,17 @@ _TERMS: dict[QueryType, dict[str, int]] = {
         "fallen": 2, "less fish": 3, "fewer fish": 3, "poor catch": 3,
         "no fish": 2, "reason": 2, "explain": 2, "cause": 2,
         "productivity": 2, "used to": 2,
+    },
+    # Read-only conditions: tide, weather and alert status. Deliberately
+    # weaker than the safety set on every shared word ("weather" 2 vs the
+    # safety set's breadth, "alerts" plural here vs "alert" singular
+    # there), so that any genuine safety phrasing outscores it -- and the
+    # fence in classify() makes that precedence absolute, not marginal.
+    QueryType.CONDITIONS_REPORT: {
+        "tide": 3, "high tide": 3, "low tide": 3, "tide table": 3,
+        "sea conditions": 3, "sea state": 2, "conditions": 2,
+        "weather": 2, "swell": 2, "seas": 2, "route": 2,
+        "alerts": 2, "advisory": 2, "advisories": 2, "visibility": 1,
     },
 }
 
@@ -108,6 +119,31 @@ def _score(text: str, terms: dict[str, int]) -> tuple[int, list[str]]:
     return total, matched
 
 
+def safety_phrasing(query: str) -> bool:
+    """Whether the query uses safety-decisive language.
+
+    Decisive means a single matched term of weight 2 or more ("safe",
+    "safest", "venture", "go out", "cyclone" ...) -- not an accumulation
+    of weak ones. "Weather" plus "sea" sums to 2 and is still just a
+    description of conditions; treating it as a safety question would make
+    the fence eat the report type it is meant to protect.
+
+    The fence between reporting and advising. A conditions report must never
+    answer a question about whether it is safe to go out -- the vessel gate
+    exists precisely for those -- so safety-decisive language routes to
+    ``SAFETY_ASSESS`` even when conditions keywords also match ("safest
+    route" scores both). Used by :func:`classify` and by the planner gate in
+    ``agents.intent_planner_agent``; the rule lives here so the two cannot
+    drift.
+    """
+    text = query.lower().strip()
+    terms = _TERMS[QueryType.SAFETY_ASSESS]
+    return any(
+        weight >= 2 and re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text)
+        for term, weight in terms.items()
+    )
+
+
 def classify(query: str) -> KeywordMatch | None:
     """Best-effort query type from keywords, or None when unsure.
 
@@ -129,6 +165,26 @@ def classify(query: str) -> KeywordMatch | None:
     scored.sort(key=lambda item: item[0], reverse=True)
     best_score, best_type, best_matched = scored[0]
     runner_up_score, runner_up = (scored[1][0], scored[1][1]) if len(scored) > 1 else (0, None)
+
+    if safety_phrasing(query):
+        # The fence: safety-decisive language outranks a conditions win at any
+        # margin, and breaks a tie involving conditions. "Safest route" ties
+        # 2-2 on keywords; answering it as a vessel-free report would bypass
+        # the safety gate, so it becomes the safety question it is (and the
+        # slot gate then asks for place and boat).
+        safety_total, safety_matched = _score(text, _TERMS[QueryType.SAFETY_ASSESS])
+        safety = KeywordMatch(
+            query_type=QueryType.SAFETY_ASSESS,
+            score=safety_total,
+            matched=sorted(safety_matched),
+            runner_up=best_type,
+            runner_up_score=best_score,
+        )
+        if best_type is QueryType.CONDITIONS_REPORT:
+            return safety
+        tied = [t for s, t, _ in scored if s == best_score]
+        if best_score <= safety_total and QueryType.CONDITIONS_REPORT in tied:
+            return safety
 
     match = KeywordMatch(
         query_type=best_type,
