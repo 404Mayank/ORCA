@@ -1,0 +1,71 @@
+# Operator-maintained advisory table.
+#
+# ============================================================================
+# WHY THIS FILE EXISTS
+# ============================================================================
+#
+# INCOIS publishes High Wave Alerts and Swell Surge advisories as text and maps
+# on a web page. There is no machine-readable feed. IMD's district warning and
+# nowcast APIs exist but are authenticated (HTTP 401 as of 2026-09-06).
+#
+# Cyclones are covered live by GDACS -- see ingest/sources/gdacs.py. Everything
+# else is covered by a human reading the INCOIS bulletin and editing this file.
+#
+# That is not a workaround, it is the honest degraded version. The alternative
+# was `active_alerts` failing permanently, which forced every safety verdict to
+# `no_go` regardless of conditions and made the system useless on a calm day.
+#
+# ============================================================================
+# HOW TO USE IT, BEFORE A DEMO OR A SHIFT
+# ============================================================================
+#
+#   1. Open https://incois.gov.in/site/services/hwa.jsp
+#   2. If an alert covers Tamil Nadu / Puducherry, add an entry below.
+#   3. If nothing is in force, leave `advisories` empty. AN EMPTY LIST IS A
+#      REAL ANSWER -- it is what lets the system say "no high wave alert is in
+#      force" as a citable negative finding.
+#   4. Set `last_reviewed` to now. This is not decoration: an entry older than
+#      `review_max_age_hours` stops counting as a check, and the verdict
+#      degrades. A table nobody refreshes must not keep passing as a check.
+#
+# Leaving a stale `warning` in here pins the verdict to no_go indefinitely.
+# Advisories with no `valid_until` expire 24 h after `issued_at` for exactly
+# that reason -- see alerts/rules.py::within_validity.
+
+meta:
+  # ISO 8601, UTC. Update whenever you check the bulletin, even if nothing
+  # changed -- "I looked and there was nothing" is the useful signal.
+  last_reviewed: "2026-09-06T00:00:00Z"
+  reviewed_by: "unassigned"
+  # Beyond this, the table is treated as unchecked rather than as empty.
+  review_max_age_hours: 24
+  source_url: "https://incois.gov.in/site/services/hwa.jsp"
+  authority: "INCOIS"
+
+# Types this table is authoritative for. Cyclone is listed because an operator
+# may transcribe an IMD bulletin here, and a transcribed IMD bulletin outranks
+# GDACS -- IMD is the Indian official authority, GDACS is corroboration.
+covers:
+  - cyclone
+  - high_wave
+  - swell_surge
+
+# ----------------------------------------------------------------------------
+# Nothing is in force. This is the normal state and a real answer.
+# ----------------------------------------------------------------------------
+advisories: []
+
+# ----------------------------------------------------------------------------
+# Worked example. Copy the shape; do not uncomment unless it is true.
+#
+# advisories:
+#   - type: high_wave            # cyclone | high_wave | swell_surge
+#     severity: warning          # advisory | watch | warning | severe
+#     zone: "Nagapattinam, Karaikal, Cuddalore"
+#     issued_at:   "2026-11-14T05:30:00Z"
+#     valid_until: "2026-11-15T05:30:00Z"
+#     authority: "INCOIS"
+#     text: >
+#       High Wave Alert. Waves 3.0-3.5 m expected along the Tamil Nadu coast.
+#       Fishermen advised not to venture into the sea.
+# ----------------------------------------------------------------------------

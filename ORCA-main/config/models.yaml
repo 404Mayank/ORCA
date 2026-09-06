@@ -1,0 +1,90 @@
+# LLM configuration.
+#
+# Two roles, deliberately separated, because they carry very different risk:
+#
+#   planner    Chooses tools and emits a task DAG. Its output is validated by
+#              orchestrator/validate_plan.py before anything executes, so a bad
+#              plan is caught, not run.
+#
+#   narrator   Turns an ALREADY VERIFIED recommendation object into English.
+#              It never sees raw data and never computes anything. Its output
+#              is checked against the object's own numbers before it is shown
+#              (agents/synthesis_agent.py::narrate), and falls back to the
+#              deterministic template renderer if it drifts.
+#
+# Neither role may produce a number attached to a safety claim. That is not a
+# prompt instruction we hope holds -- it is enforced in code on both sides.
+
+# Tried in order; the first provider that returns a usable completion wins.
+# Groq first because it is the fast, cheap tier CLAUDE.md asks for and the key
+# we have. Anthropic if a key appears. Ollama when the venue loses internet.
+provider_order: [groq, anthropic, ollama]
+
+# Legacy single-provider fields, still honoured if provider_order is absent.
+provider: groq
+fallback_provider: ollama
+
+groq:
+  # Roster verified against /models with our key on 2026-09-04. The models
+  # CLAUDE.md originally named here (Llama 3.3 70B, Mistral Large) are no
+  # longer offered; gpt-oss-120b is the strongest text model available.
+  # Do not put a model id here without checking it appears in that listing --
+  # a 404 at demo time is a silent fall-through to the next tier.
+  planner:
+    model: openai/gpt-oss-120b
+    reasoning_effort: medium
+    temperature: 0.1
+    max_tokens: 4096
+  narrator:
+    model: openai/gpt-oss-120b
+    # A paragraph rewrite does not need a long think. gpt-oss models reason
+    # by default; "low" keeps latency down without changing the guard's job.
+    reasoning_effort: low
+    temperature: 0.2
+    max_tokens: 1024
+  deliberator:
+    # One call per domain agent per turn, so latency and rate limit matter more
+    # here than raw capability. The task is narrow -- read a handful of typed
+    # findings and say what is missing -- and the 20b model is enough for it.
+    model: openai/gpt-oss-20b
+    reasoning_effort: low
+    temperature: 0.1
+    max_tokens: 700
+
+anthropic:
+  # Model ids are exact strings; never append a date suffix.
+  planner:
+    model: claude-opus-5
+    effort: high             # planning is the reasoning-heavy role
+    max_tokens: 4096
+  narrator:
+    model: claude-opus-5
+    # Narration is a rewriting task over a small, fully-specified object, so it
+    # runs at low effort. CLAUDE.md originally called for a cheap Groq-hosted
+    # model here; switching is a one-line change -- set model to
+    # claude-sonnet-5 or claude-haiku-4-5 if cost or latency needs it.
+    effort: low
+    max_tokens: 1024
+  deliberator:
+    model: claude-haiku-4-5
+    effort: low
+    max_tokens: 700
+
+ollama:
+  # The venue will lose internet. This tier keeps the demo alive.
+  base_url: "http://localhost:11434"
+  planner:
+    model: "llama3.1:8b"
+  narrator:
+    model: "llama3.1:8b"
+  deliberator:
+    model: "llama3.1:8b"
+
+limits:
+  timeout_s: 30.0
+  max_retries: 2
+
+# When no provider is reachable, narration falls back to
+# language/templates/en, which is deterministic and always correct -- just
+# less fluent. The system never loses the ability to answer.
+allow_template_fallback: true

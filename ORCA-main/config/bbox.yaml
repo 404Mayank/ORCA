@@ -1,0 +1,84 @@
+# ORCA phase-one spatial scope: the South Coromandel box.
+#
+# This file is the single source of truth for the study area and the target
+# grid. Nothing in the codebase may hardcode a bound or a grid step; import
+# from here. The architecture is region-agnostic — only this file is scoped.
+
+region:
+  id: south_coromandel
+  label: "South Coromandel"
+  description: >
+    Chennai to Rameswaram, including Palk Bay and the Gulf of Mannar.
+    Chosen because it contains the northeast-monsoon cyclone corridor, the
+    India-Sri Lanka International Maritime Boundary Line, and the Gulf of
+    Mannar Marine National Park - the three constraints that make the
+    geofence and safety queries non-trivial.
+
+bbox:
+  lon_min: 78.5
+  lon_max: 82.0
+  lat_min: 8.0
+  lat_max: 12.0
+  crs: "EPSG:4326"
+  # Order matches the GeoJSON / rasterio convention: (west, south, east, north).
+  as_tuple: [78.5, 8.0, 82.0, 12.0]
+
+grid:
+  # Every gridded field is regridded onto this at ingest time. Never at query
+  # time. A field that does not sit on this grid has not finished ingesting.
+  step_deg: 0.05
+  crs: "EPSG:4326"
+  n_lon: 71   # (82.0 - 78.5) / 0.05 + 1
+  n_lat: 81   # (12.0 -  8.0) / 0.05 + 1
+  # Cell centres vs edges: coordinates below are CELL CENTRES, inclusive of
+  # both endpoints. np.linspace(lat_min, lat_max, n_lat) reproduces them
+  # exactly; np.arange does not, because of float accumulation. Use linspace.
+  lon_origin: 78.5
+  lat_origin: 8.0
+  # 0.05 deg is ~5.5 km in latitude and ~5.45 km in longitude at 10 N.
+  approx_cell_km: 5.5
+  #
+  # CORRECTION (verified 2026-09-04, see docs/verified_sources.md).
+  # An earlier draft of this file claimed 0.05 deg was chosen because it
+  # matches the wave model grid and so needs no interpolation. That is FALSE
+  # for our phase-one source and has been removed rather than softened.
+  #
+  # Measured by probing the Open-Meteo Marine API across a longitude sweep at
+  # 10.77 N: returned cell centres snap to 79.95836 and 80.04167, a spacing of
+  # 0.08331 deg = 1/12.003. The wave model serving the Bay of Bengal is
+  # therefore on a 1/12 deg (~9.3 km) grid, not 0.05 deg.
+  #
+  # Consequences, stated so nobody rediscovers them at 2am:
+  #   - Regridding wave fields to 0.05 deg is UPSAMPLING. It creates no new
+  #     information. It is done so every field shares one grid, which is worth
+  #     doing, but it must never be described as native resolution.
+  #   - EvidenceEntry.native_resolution_deg must carry 0.0833 for Open-Meteo
+  #     wave data, not 0.05. The honest number is the one we cite.
+  #   - The 0.05 deg claim may hold for INCOIS MWW3, which CLAUDE.md lists as
+  #     an upgrade path. We have NOT verified that, and must not claim it
+  #     until we have.
+  source_grid_note: >
+    Target grid is a common frame, not a resolution claim. Each dataset's true
+    native resolution travels with its values in DataQuality/Provenance.
+  verified_native_resolution_deg:
+    open_meteo_marine: 0.0833   # measured, 1/12 deg
+    open_meteo_forecast: null   # separate grid; snapped differently, not yet measured
+
+reference_points:
+  # Used for smoke tests, fixtures and demo defaults. Landing centre positions
+  # are provisional until ingest/static/landing_centres.py loads the INCOIS
+  # set; treat these as approximate and do not cite them to a judge.
+  chennai:        { lat: 13.08, lon: 80.27, note: "north of box, refusal test" }
+  cuddalore:      { lat: 11.75, lon: 79.77 }
+  nagapattinam:   { lat: 10.77, lon: 79.84, note: "primary demo origin" }
+  point_calimere: { lat: 10.29, lon: 79.85, note: "Palk Bay / Bay of Bengal divide" }
+  rameswaram:     { lat:  9.29, lon: 79.31 }
+  tuticorin:      { lat:  8.76, lon: 78.13, note: "west of box, refusal test" }
+  kochi:          { lat:  9.93, lon: 76.27, note: "outside box, refusal test" }
+
+sub_basins:
+  # Coarse rectangles, used only for labelling and the sheltered-alternative
+  # lookup. Real geometry comes from ingest/static/boundaries.py.
+  bay_of_bengal: { lat_min: 10.30, lat_max: 12.00, lon_min: 79.50, lon_max: 82.00 }
+  palk_bay:      { lat_min:  9.30, lat_max: 10.30, lon_min: 79.00, lon_max: 80.00 }
+  gulf_of_mannar: { lat_min:  8.00, lat_max:  9.30, lon_min: 78.50, lon_max: 79.80 }

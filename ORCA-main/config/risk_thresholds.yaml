@@ -1,0 +1,401 @@
+# ORCA risk thresholds
+#
+# THIS IS A DELIVERABLE, NOT A CONFIG FILE.
+# It is what we open when a judge asks "why 2.5 m?".
+#
+# ---------------------------------------------------------------------------
+# THE RULE FOR THIS FILE
+# ---------------------------------------------------------------------------
+# Every threshold carries a `provenance` tag. There are exactly three values
+# and they mean different things:
+#
+#   published   Taken from a published operational criterion. The citation
+#               names the issuing authority and what was actually verified.
+#               These numbers are not ours and we do not change them.
+#
+#   orca        Set by us, with the reasoning stated. Usually more
+#               conservative than a published area-wide criterion, because an
+#               area alert for a coastline is not the same thing as an
+#               operating limit for one 9 m boat.
+#
+#   provisional Set by us and NOT yet validated against a source. These must
+#               be labelled as such wherever they surface, and they must not
+#               be presented to a judge as though INCOIS set them.
+#
+# Inventing a citation would be faking data, which CLAUDE.md forbids. Where we
+# could not verify a number, it says so. That is a stronger position than a
+# confident wrong attribution, and it is a shorter conversation with a judge.
+#
+# ---------------------------------------------------------------------------
+# WHAT WE VERIFIED, AND WHAT WE COULD NOT
+# ---------------------------------------------------------------------------
+# Verified (September 2026):
+#   - INCOIS High Wave Alert criteria, significant wave height and swell
+#     height, alert vs warning bands. See `incois_high_wave_alert` below.
+#   - INCOIS Small Vessel Advisory Service covers vessels of beam width up to
+#     7 m, which INCOIS states spans the full range of fishing vessel beam
+#     widths across all nine Indian coastal states and union territories.
+#   - The SVAS warning is driven by a Boat Safety Index (BSI) computed from
+#     significant wave height, wave steepness, directional spread, and rapid
+#     wind-sea development, forecast three days ahead.
+#
+# Could NOT verify:
+#   - The exact BSI formula and its warning threshold. The defining paper
+#     (Ocean Dynamics / Journal of Operational Oceanography, 2020) is
+#     paywalled and returns 403; the INCOIS SVAS portal was unreachable from
+#     our network at the time of writing. We therefore do NOT implement BSI
+#     and do NOT claim to. We implement the components it is built from, which
+#     is honest and still defensible.
+#   - Per-vessel-class wave and wind operating limits. INCOIS publishes
+#     coastline-segment alerts, not per-boat limits. Every per-class number
+#     below is therefore `orca` or `provisional`, never `published`.
+#
+# ACTION BEFORE DEMO: if the SIH problem statement pack or a mentor can supply
+# the SVAS technical note, replace the provisional block and re-tag it.
+
+meta:
+  version: "0.1.0"
+  last_reviewed: "2026-09-04"
+  units_note: >
+    Units are explicit on every threshold and are matched exactly at
+    comparison time. core.units.evaluate() raises on a unit mismatch rather
+    than converting, because a silent m/s to knot conversion is precisely the
+    bug that unit confusion produces.
+
+# ===========================================================================
+# PUBLISHED CRITERIA
+# ===========================================================================
+# These are not ours. Reproduced so that our own limits can be shown next to
+# the official ones, and so the difference is visible rather than hidden.
+
+incois_high_wave_alert:
+  description: >
+    INCOIS High Wave Alert service. Issued for coastline segments, not for
+    individual vessels. This is an area-scale public warning and is the
+    corroboration layer for our own assessment, not a substitute for it.
+  authority: "INCOIS (Indian National Centre for Ocean Information Services)"
+  source_url: "https://incois.gov.in/site/services/hwa.jsp"
+  verified_on: "2026-09-04"
+  provenance: published
+
+  significant_wave_height:
+    alert:
+      min_m: 3.0
+      max_m: 3.5
+      # Verified: Hs between 3.0 m and 3.5 m puts coastal regions on alert.
+      meaning: "Coastal regions placed on alert."
+    warning:
+      min_m: 3.5
+      # Verified: Hs above 3.5 m triggers a high wave warning.
+      meaning: "High wave warning issued."
+
+  swell_height:
+    # The same service applies a lower band to swell specifically, because
+    # long-period swell breaks harder inshore than its height suggests.
+    alert:
+      min_m: 2.5
+      max_m: 3.0
+    warning:
+      min_m: 3.0
+
+incois_small_vessel_advisory:
+  description: >
+    INCOIS Small Vessel Advisory Service. Warns of zones and times at which
+    vessel overturning may occur, three days in advance.
+  authority: "INCOIS"
+  source_url: "https://incois.gov.in/site/services/SVA_overview.jsp"
+  verified_on: "2026-09-04"
+  provenance: published
+
+  scope:
+    max_beam_width_m: 7.0
+    # Verified: INCOIS states this covers the entire range of beam widths of
+    # fishing vessels used across all nine Indian coastal states and UTs.
+    # Every vessel class ORCA models falls inside this scope.
+
+  index:
+    name: "Boat Safety Index (BSI)"
+    # Verified: BSI is derived from significant wave height, wave steepness,
+    # directional spread, and rapid wind-sea development.
+    # NOT verified: the formula and its threshold. We do not implement BSI.
+    # We compute its stated components independently -- see `derived_metrics`.
+    components:
+      - significant_wave_height
+      - wave_steepness
+      - directional_spread
+      - rapid_wind_sea_development
+    implemented_by_orca: false
+    note: >
+      We deliberately do not claim to compute BSI. Claiming an index whose
+      formula we could not obtain would be exactly the kind of unfounded
+      number the governing rule exists to prevent.
+
+# ===========================================================================
+# ORCA VESSEL CLASSES AND OPERATING LIMITS
+# ===========================================================================
+# These are OUR limits. They are deliberately more conservative than the
+# INCOIS area-alert bands above, and the reason is stated per class rather
+# than assumed:
+#
+#   An INCOIS alert at 3.0 m tells a whole district that the sea is dangerous.
+#   It does not tell one man in a 9 m FRP boat when to turn back. A district
+#   that is not on alert can still be unworkable for a kattumaram, and by the
+#   time an area warning fires at 3.5 m an open boat has been in trouble for
+#   hours. So our per-class limits sit below the area criteria on purpose.
+#
+# Class keys match core.schemas.intent.VesselClass exactly. A mismatch here is
+# a KeyError at risk-scoring time, which is the failure mode we want -- loud,
+# immediate, and impossible to ship.
+
+vessel_classes:
+
+  kattumaram:
+    label: "Kattumaram / vallam (traditional, under ~7 m)"
+    typical_length_m: [5.0, 7.0]
+    typical_beam_m: [1.2, 2.0]
+    cruise_speed_kn: 4.0
+    typical_operating_range_km: 12.0
+    # PROVISIONAL. Needed to compute Window.turn_back from steam time rather
+    # than a flat margin. Needs CMFRI or landing-centre validation.
+    provenance: provisional
+    note: >
+      The most exposed class: low freeboard, often no engine, no shelter.
+      Dimensions and speed are provisional and need CMFRI or local landing
+      centre validation before they are cited.
+
+    limits:
+      significant_wave_height:
+        value: 1.5
+        unit: m
+        comparison: lte
+        provenance: orca
+        rationale: >
+          Half the INCOIS area alert threshold. An open craft with under a
+          metre of freeboard ships water long before a district-scale alert
+          fires. Conservative on purpose.
+      wind_speed:
+        value: 15.0
+        unit: kn
+        comparison: lte
+        provenance: orca
+        rationale: >
+          Beaufort 4 upper bound. Above this a small open craft cannot hold
+          station to work gear, regardless of wave height.
+      wave_steepness:
+        value: 0.045
+        unit: fraction
+        comparison: lte
+        provenance: provisional
+        rationale: >
+          Steepness matters more than height for a short hull -- a 1.5 m sea
+          at 4 s is a different sea from 1.5 m at 10 s. Value not yet
+          validated against a source.
+
+  frp_9m:
+    label: "FRP boat with outboard, ~9 m"
+    typical_length_m: [8.0, 10.0]
+    typical_beam_m: [2.0, 2.8]
+    cruise_speed_kn: 7.0
+    typical_operating_range_km: 25.0
+    # PROVISIONAL. See kattumaram note. This value directly sets how early a
+    # fisherman is told to turn back, so it is load-bearing, not cosmetic.
+    provenance: provisional
+    note: >
+      The modal South Coromandel day-fishing vessel and the default demo
+      subject. Cruise speed is used to compute Window.turn_back from the
+      distance back to port; it is provisional and should be confirmed with a
+      landing centre before it appears in a judged demo.
+
+    limits:
+      significant_wave_height:
+        value: 2.5
+        unit: m
+        comparison: lte
+        provenance: orca
+        rationale: >
+          THIS IS THE NUMBER A JUDGE WILL ASK ABOUT. It is ours, not INCOIS's.
+          It sits 0.5 m below the INCOIS 3.0 m area-alert floor, for two
+          reasons. First, an area alert is a district-scale statement and a
+          decision to launch is a boat-scale one; the margin absorbs
+          within-district variation the 0.05 deg grid does not resolve.
+          Second, the limit has to be survivable on the way back, not just on
+          the way out -- a boat that departs at the limit meets worse
+          conditions with a loaded hull and a following sea. See
+          docs/ideal_answers/safety_assess.md, where 2.2 m against this limit
+          is correctly reported as marginal rather than safe.
+      wind_speed:
+        value: 25.0
+        unit: kn
+        comparison: lte
+        provenance: orca
+        rationale: >
+          Beaufort 6 lower bound, and the low end of the internationally
+          conventional small-craft advisory range (NWS uses sustained 20-33 kn
+          for small craft). Applied to the gust, not the mean, via
+          Range.peak -- gusts capsize boats, averages do not.
+      wave_steepness:
+        value: 0.055
+        unit: fraction
+        comparison: lte
+        provenance: provisional
+      visibility:
+        value: 2.0
+        unit: km
+        comparison: gte
+        provenance: provisional
+        rationale: >
+          These boats carry VHF but no radar. Below this a return transit to a
+          specific landing centre stops being reliable.
+
+  mechanised_trawler:
+    label: "Mechanised trawler, ~15-20 m"
+    typical_length_m: [15.0, 20.0]
+    typical_beam_m: [4.0, 6.0]
+    cruise_speed_kn: 9.0
+    typical_operating_range_km: 80.0
+    # PROVISIONAL. Multi-day vessels range further; this is a day-trip figure.
+    provenance: provisional
+    note: >
+      Still inside the INCOIS SVAS 7 m beam-width scope. Multi-day capable,
+      decked, with power to make way against a sea an open boat cannot.
+
+    limits:
+      significant_wave_height:
+        value: 3.5
+        unit: m
+        comparison: lte
+        provenance: orca
+        rationale: >
+          Aligned with the INCOIS warning threshold rather than set below it.
+          For a decked vessel of this size the district-scale warning is a
+          reasonable operating limit; the conservatism applied to smaller
+          classes buys nothing here and would produce advice fishermen would
+          correctly ignore. An advisory system that cries wolf gets switched
+          off, and then it protects nobody.
+      wind_speed:
+        value: 33.0
+        unit: kn
+        comparison: lte
+        provenance: orca
+        rationale: "Beaufort 7 upper bound; the top of the small-craft range."
+      wave_steepness:
+        value: 0.065
+        unit: fraction
+        comparison: lte
+        provenance: provisional
+
+# ===========================================================================
+# DERIVED METRICS
+# ===========================================================================
+# Quantities we compute ourselves from forecast fields. These are the BSI
+# components we can obtain honestly, computed as ourselves rather than
+# presented as INCOIS's index.
+
+derived_metrics:
+
+  wave_steepness:
+    description: >
+      Ratio of wave height to wavelength. Captures the difference between a
+      2 m swell at 12 s, which a boat rides, and a 2 m wind sea at 5 s, which
+      breaks over it. Height alone cannot tell those apart, which is why
+      INCOIS includes steepness in BSI.
+    formula: "S = 2 * pi * Hs / (g * Tp^2)"
+    inputs: [significant_wave_height_m, peak_period_s]
+    constants: { g: 9.81 }
+    unit: fraction
+    provenance: published
+    citation: >
+      Standard deep-water wave steepness from linear wave theory, using the
+      deep-water dispersion relation L = g*T^2/(2*pi). Not INCOIS-specific;
+      the identity is textbook and needs no attribution beyond that.
+    available_from: "Open-Meteo Marine (wave_height + wave_period)"
+
+  rapid_wind_sea_development:
+    description: >
+      Rate of increase of wind-wave height. A sea building fast is more
+      dangerous than a steady sea of the same height, because it catches boats
+      already offshore. This is what drives the trajectory block in the
+      recommendation and the 'most of the build is between 11:00 and 14:00'
+      sentence.
+    formula: "max over the window of d(Hs_windwave)/dt"
+    unit: m/h
+    threshold:
+      value: 0.3
+      unit: m/h
+      comparison: lte
+      provenance: provisional
+      rationale: >
+        A build of more than ~0.3 m/h gives a 7 kn boat little time to reach
+        shelter. Not yet validated; flagged provisional deliberately.
+    available_from: "Open-Meteo Marine (wind_wave_height hourly)"
+
+  directional_spread:
+    description: >
+      Spread of wave energy across directions. A confused sea from several
+      directions is worse than an organised swell of the same height. Listed
+      because it is a stated BSI component.
+    status: not_implemented
+    reason: >
+      Not exposed by Open-Meteo Marine. Would require the INCOIS MWW3 spectral
+      output. Recorded here so the gap is visible rather than forgotten, and
+      so nobody claims we compute it.
+
+# ===========================================================================
+# VERDICT BANDING
+# ===========================================================================
+
+verdict:
+  marginal_band_fraction:
+    value: 0.15
+    provenance: orca
+    rationale: >
+      A value within 15% of its limit is reported as marginal rather than
+      safe. Mirrors core.units.DEFAULT_MARGINAL_BAND. Chosen so that 2.2 m
+      against a 2.5 m limit reads as marginal -- which is the honest answer
+      and the case the whole system is designed around. Without this band the
+      verdict is a cliff at the threshold, and a cliff is what makes a
+      forecast system feel wrong to someone who can see the sea.
+
+  score_bands:
+    # compute_risk_score() output to band label. The score is internal and is
+    # never spoken to a fisherman -- '0.4875' means nothing to him. It appears
+    # in the evidence drawer only.
+    go:       { max: 0.35 }
+    marginal: { min: 0.35, max: 0.75 }
+    no_go:    { min: 0.75 }
+    provenance: orca
+
+  degradation:
+    description: >
+      When a safety-critical input is missing, the verdict is downgraded and
+      never upgraded. Enforced structurally in
+      core.schemas.recommendation.Recommendation, which refuses to build a
+      'go' alongside a failed tool call.
+    missing_alert_check_forces: no_go
+    provenance: orca
+    rationale: >
+      If the cyclone check did not complete we do not know whether a cyclone
+      is active, and 'probably fine' is not something anyone should put a boat
+      in the water on.
+
+# ===========================================================================
+# DATA FRESHNESS
+# ===========================================================================
+# Cloud gaps are the single biggest data risk in this project. These bounds
+# decide when data is too old to support a safety verdict at all.
+
+data_freshness:
+  forecast_max_age_h:
+    value: 12.0
+    provenance: orca
+    rationale: "Open-Meteo refreshes roughly 4-hourly; 12 h means we missed several cycles."
+  satellite_max_age_days:
+    value: 7.0
+    provenance: orca
+    rationale: >
+      Beyond a 7-day composite, chlorophyll and SST fronts have moved and a
+      PFZ derived from them is fiction. Surfaced in confidence.basis, never
+      silently substituted.
+  composite_ladder: [1, 3, 7]
+  # Single pass, then 3-day, then 7-day. Which rung was used is always
+  # recorded in DataQuality.composite_window_days and stated to the user.

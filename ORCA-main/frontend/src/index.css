@@ -1,0 +1,492 @@
+/* ORCA — instrument console.
+ *
+ * A HUD, not a chat app. The subject is a safety decision read on a phone
+ * before dawn, so: black ground, one accent, monospaced labels, and numbers
+ * that read as instrument values rather than as copy.
+ *
+ * Verdict colour is the single exception to the one-accent rule, and it is the
+ * only place hue carries meaning: green, amber and red ARE the verdict. Nothing
+ * else in the interface may use them.
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@300;400;500;700&display=swap");
+
+:root {
+  --bg: #000000;
+  --panel: #050708;
+  --panel-2: #0b1011;
+  --line: #14211f;
+  --line-2: #1d2f2c;
+  --text: #dfeceb;
+  --muted: #5f7472;
+  --dim: #3a4a48;
+
+  --accent: #4ff5e0;
+  --accent-dim: rgba(79, 245, 224, 0.45);
+  --accent-ghost: rgba(79, 245, 224, 0.08);
+
+  --go: #3ce08a;
+  --marginal: #ffc44d;
+  --no-go: #ff4d5e;
+
+  --display: "Orbitron", ui-sans-serif, system-ui, sans-serif;
+  --body: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scanlines and vignette, both under 3%. This should read as a screen, not as
+   a filter over one. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.018) 0 1px,
+      transparent 1px 3px
+    ),
+    radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(0, 0, 0, 0.75) 100%);
+}
+
+::selection { background: var(--accent); color: #001210; }
+
+/* -- boot ---------------------------------------------------------------- */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 16px;
+  background: var(--bg);
+  transition: opacity 0.5s ease;
+}
+.boot.out { opacity: 0; pointer-events: none; }
+.boot-mark {
+  font: 900 46px/1 var(--display);
+  letter-spacing: 10px;
+  color: var(--accent);
+  text-shadow: 0 0 26px var(--accent-dim);
+}
+.boot-title {
+  font: 700 13px/1 var(--display);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+.boot-sub { font-size: 12px; color: var(--muted); font-style: italic; }
+.boot-bar {
+  width: min(340px, 70vw);
+  height: 2px;
+  background: var(--line);
+  position: relative;
+}
+.boot-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  transition: width 0.25s linear;
+}
+.boot-pct { font: 500 10px var(--mono); letter-spacing: 2px; color: var(--muted); }
+
+/* -- shell --------------------------------------------------------------- */
+
+/* One column by default. The map earns its space only once an answer has a
+   position on it, and then the grid splits. */
+.app {
+  display: grid;
+  grid-template-columns: 1fr;
+  height: 100%;
+  transition: grid-template-columns 0.32s ease;
+}
+.app.split { grid-template-columns: minmax(400px, 520px) 1fr; }
+@media (max-width: 940px) {
+  .app.split { grid-template-columns: 1fr; grid-template-rows: 1fr 45%; }
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+/* Unsplit, the sidebar is the whole page. Cap the measure so an answer does
+   not run to 1900px of line length on a desktop. */
+.app:not(.split) .messages,
+.app:not(.split) .composer,
+.app:not(.split) .samples,
+.app:not(.split) .status,
+.app:not(.split) .brand {
+  width: min(100%, 860px);
+  margin-inline: auto;
+}
+.app:not(.split) .sidebar { border-right: none; }
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.brand h1 {
+  margin: 0;
+  font: 900 20px/1 var(--display);
+  letter-spacing: 6px;
+  color: var(--accent);
+  text-shadow: 0 0 20px var(--accent-dim);
+}
+.brand span {
+  font: 500 9px var(--mono);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* Bracketed HUD label, used for every section heading. */
+.hud {
+  font: 500 9px var(--mono);
+  letter-spacing: 2.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hud::before { content: "[ "; color: var(--dim); }
+.hud::after { content: " ]"; color: var(--dim); }
+
+.status {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.chip {
+  font: 500 9px var(--mono);
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.chip.ok { border-color: var(--accent-dim); color: var(--accent); }
+.chip.bad { border-color: var(--no-go); color: var(--no-go); }
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.messages::-webkit-scrollbar { width: 6px; }
+.messages::-webkit-scrollbar-thumb { background: var(--line-2); }
+
+.msg {
+  padding: 13px 15px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-size: 13.5px;
+  line-height: 1.65;
+  animation: rise 0.28s ease both;
+}
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+
+.msg.user {
+  align-self: flex-end;
+  max-width: 88%;
+  background: var(--accent-ghost);
+  border: 1px solid var(--accent-dim);
+}
+.msg.bot {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-2);
+}
+.msg.err { border-left-color: var(--no-go); }
+
+.verdict {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 5px 12px;
+  font: 700 12px var(--display);
+  letter-spacing: 3px;
+  border: 1px solid currentColor;
+}
+.verdict.go { color: var(--go); box-shadow: 0 0 22px rgba(60, 224, 138, 0.16); }
+.verdict.marginal { color: var(--marginal); box-shadow: 0 0 22px rgba(255, 196, 77, 0.16); }
+.verdict.no_go { color: var(--no-go); box-shadow: 0 0 22px rgba(255, 77, 94, 0.18); }
+
+.options { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.options button {
+  font: 500 10px var(--mono);
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  background: transparent;
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.options button:hover { background: var(--accent); color: #001210; }
+
+.meta {
+  margin-top: 11px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  font: 500 9px var(--mono);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.meta button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  border-bottom: 1px solid var(--accent-dim);
+}
+.meta button:hover { color: #fff; }
+
+/* Agent reasoning, and requests one agent made to another. */
+.collab {
+  margin-top: 11px;
+  padding: 9px 0 9px 11px;
+  border-left: 1px solid var(--accent-dim);
+}
+.collab-h {
+  font: 500 9px var(--mono);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 5px;
+}
+.collab-line { font-size: 11.5px; line-height: 1.55; color: var(--muted); margin-bottom: 3px; }
+.collab.think { border-left-color: rgba(255, 196, 77, 0.4); }
+.collab.think .collab-h { color: var(--marginal); }
+
+.samples { display: flex; flex-direction: column; gap: 5px; padding: 0 16px 14px; }
+.samples button {
+  text-align: left;
+  font: 400 11.5px var(--body);
+  padding: 8px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-2);
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.samples button:hover { color: var(--text); border-left-color: var(--accent); }
+
+.composer { display: flex; gap: 8px; padding: 14px 16px; border-top: 1px solid var(--line); }
+/* The input was almost invisible: a near-black field on black with a --dim
+   placeholder. It is the one control every user must find, so it glows at rest
+   -- not only on focus. On a black ground the eye goes to the brightest thing,
+   and that should be the place you type. */
+.composer input {
+  flex: 1;
+  background: #10201f;
+  border: 1px solid var(--accent);
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+  padding: 13px 15px;
+  font: 400 14px var(--body);
+  outline: none;
+  box-shadow:
+    0 0 0 1px rgba(79, 245, 224, 0.22),
+    0 0 26px rgba(79, 245, 224, 0.2),
+    inset 0 0 22px rgba(79, 245, 224, 0.07);
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+.composer input:focus {
+  background: #15302e;
+  box-shadow:
+    0 0 0 2px rgba(79, 245, 224, 0.45),
+    0 0 42px rgba(79, 245, 224, 0.4),
+    inset 0 0 28px rgba(79, 245, 224, 0.12);
+}
+.composer input::placeholder { color: #93b3b0; }
+
+/* A slow pulse while the field is empty and unfocused, so it reads as the
+   thing to do next. It stops the moment the user engages -- a control that
+   keeps pulsing while you type is noise. */
+.composer input:not(:focus):placeholder-shown { animation: await 2.6s ease-in-out infinite; }
+@keyframes await {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(79, 245, 224, 0.22),
+      0 0 26px rgba(79, 245, 224, 0.2),
+      inset 0 0 22px rgba(79, 245, 224, 0.07);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(79, 245, 224, 0.4),
+      0 0 40px rgba(79, 245, 224, 0.34),
+      inset 0 0 26px rgba(79, 245, 224, 0.12);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer input:not(:focus):placeholder-shown { animation: none; }
+}
+.composer button {
+  font: 700 11px var(--display);
+  letter-spacing: 2.5px;
+  padding: 0 22px;
+  background: var(--accent);
+  color: #001210;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 0 26px rgba(79, 245, 224, 0.35);
+  transition: box-shadow 0.2s ease;
+}
+.composer button:hover:not(:disabled) { box-shadow: 0 0 40px rgba(79, 245, 224, 0.6); }
+.composer button:disabled { background: var(--line-2); color: var(--muted); box-shadow: none; cursor: default; }
+
+/* -- map stage ----------------------------------------------------------- */
+
+.stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg);
+  border-left: 1px solid var(--line);
+  animation: panelIn 0.32s ease both;
+}
+@keyframes panelIn { from { opacity: 0; transform: translateX(10px); } }
+.map { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+
+/* The basemap is a bright raster, and the console is black. Damped hard, then
+   tinted toward the accent hue, so the map reads as part of the instrument
+   rather than a light window cut into it. Two passes because filter alone
+   leaves the land grey-blue: the overlay supplies the tint. */
+.map .maplibregl-canvas { filter: saturate(0.3) brightness(0.42) contrast(1.25); }
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(6, 26, 24, 0.42), rgba(6, 26, 24, 0.42)),
+    radial-gradient(90% 70% at 50% 50%, transparent 40%, rgba(0, 0, 0, 0.6) 100%);
+  mix-blend-mode: multiply;
+}
+.maplibregl-ctrl-group {
+  background: var(--panel-2) !important;
+  border: 1px solid var(--line-2) !important;
+}
+.maplibregl-ctrl-group button { filter: invert(1) hue-rotate(180deg) brightness(1.4); }
+.maplibregl-ctrl-attrib { background: rgba(0, 0, 0, 0.6) !important; font-size: 9px !important; }
+.maplibregl-ctrl-attrib a { color: var(--dim) !important; }
+
+/* The panel has a real header now. The old free-floating tag sat on top of
+   the map and collided with the evidence drawer's first heading. */
+.panel-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.panel-tabs { display: flex; gap: 6px; }
+.panel-tabs button {
+  font: 500 9px var(--mono);
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+.panel-tabs button:hover:not(:disabled) { color: var(--text); border-color: var(--accent-dim); }
+.panel-tabs button.on { color: var(--accent); border-color: var(--accent-dim); background: var(--accent-ghost); }
+.panel-tabs button:disabled { opacity: 0.3; cursor: default; }
+.panel-tabs .x { padding: 4px 9px; font-size: 12px; line-height: 1; }
+
+.panel-body { position: relative; flex: 1; min-height: 0; }
+.panel-body.scroll { overflow-y: auto; }
+.panel-body.scroll::-webkit-scrollbar { width: 6px; }
+.panel-body.scroll::-webkit-scrollbar-thumb { background: var(--line-2); }
+
+/* -- evidence drawer ----------------------------------------------------- */
+
+/* Sits inside .panel-body now, which owns the scrolling and the frame. */
+.drawer { padding: 18px; }
+
+.drawer h2 {
+  margin: 22px 0 9px;
+  font: 500 9px var(--mono);
+  letter-spacing: 2.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.drawer h2::before { content: "[ "; color: var(--dim); }
+.drawer h2::after { content: " ]"; color: var(--dim); }
+.drawer h2:first-of-type { margin-top: 0; }
+
+/* The panel bar carries the close control; the drawer's own would be a
+   second one doing the same job. */
+.drawer .close { display: none; }
+
+.card {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-2);
+  padding: 11px;
+  margin-bottom: 7px;
+  font-size: 12.5px;
+}
+.card .k {
+  margin-top: 3px;
+  font: 500 10px var(--mono);
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+.mono { font-family: var(--mono); font-size: 10px; word-break: break-all; color: var(--dim); }
+
+.pill {
+  margin-left: 7px;
+  padding: 1px 6px;
+  font: 500 9px var(--mono);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+}
+.pill.observed { border-color: var(--accent-dim); color: var(--accent); }
+.pill.derived { border-color: rgba(255, 196, 77, 0.4); color: var(--marginal); }
+.pill.inferred { border-color: var(--line-2); color: var(--muted); }
+.pill.yes { border-color: var(--go); color: var(--go); }
+.pill.no { border-color: var(--no-go); color: var(--no-go); }
+
+.bar { height: 3px; margin-top: 7px; background: #0d1413; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--accent); box-shadow: 0 0 8px var(--accent-dim); }
