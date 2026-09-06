@@ -826,21 +826,33 @@ class Recommendation(BaseModel):
 
         The rule from the ideal answer document. If the alert check failed we
         do not know whether a cyclone is active, and "probably fine" is not an
-        answer anyone should act on. Degradation may lower a verdict and may
-        never permit the top one.
+        answer anyone should act on.
+
+        **What counts as "missing" was narrowed on 2026-09-07.** This used to
+        block on the generic ``degraded`` flag, which the executor raises for
+        *any* degraded step. That included steps a safety verdict does not read:
+        a geofence check reporting that it has IMBL geometry but not MPA, or a
+        chlorophyll field two days old. The consequence was perverse -- when an
+        agent voluntarily added a boundary check to a safety question, checking
+        **more** turned a valid ``go`` into a crash.
+
+        A failed call still blocks, and that is the case the rule was written
+        for: ``active_alerts`` returns FAILED when it cannot check, so the alert
+        path is caught here and again in ``compute_risk_score``, which forces
+        ``no_go`` on ``alerts_checked=False``. Degradation short of failure is
+        disclosed through ``caveats`` and ``confidence``, where it belongs.
         """
         failed = [e.tool_call_id for e in self.evidence if e.status == "failed"]
         if (
             self.query_type is QueryType.SAFETY_ASSESS
             and self.verdict is not None
             and self.verdict.value is VerdictValue.GO
-            and (self.degraded or failed)
+            and failed
         ):
             raise ValueError(
-                "Verdict is 'go' but the answer is degraded "
-                f"(failed tool calls: {failed or 'none'}, degraded flag: "
-                f"{self.degraded}). A safety check that did not complete cannot "
-                "produce a clean go -- downgrade with Verdict.downgraded_to()."
+                f"Verdict is 'go' but safety inputs failed (tool calls: {failed}). "
+                "A safety check that did not complete cannot produce the top "
+                "verdict; degrade it instead."
             )
         return self
 

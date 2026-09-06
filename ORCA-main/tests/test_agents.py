@@ -378,13 +378,145 @@ def test_only_an_answered_turn_can_supply_context_to_a_follow_up():
 
     store = SessionStore()
     intent = _intent()
+    # "error" was added on 2026-09-07. A turn that resolved a place and a
+    # vessel and then failed in synthesis still established those slots -- the
+    # user said them, and making them repeat themselves because our assembly
+    # step raised charges our failure to them.
     for state, expected in (
         ("answer", True),
+        ("error", True),
         ("clarification", False),
         ("refusal", False),
-        ("error", False),
         ("plan", False),  # the planner's word, deliberately not accepted here
     ):
         store.forget("s1")
         store.record("s1", Turn(turn_id="t1", query="q", intent=intent, state=state))
         assert (store.context_for("s1") is not None) is expected, state
+
+
+def test_a_reply_to_a_clarification_fills_the_slot_it_answered():
+    """Found in the UI on 2026-09-06: an infinite question loop.
+
+    Asked "which landing centre and what boat", the user clicked
+    MECHANISED TRAWLER -- and was asked the identical question again, forever.
+    SessionStore.context_for deliberately refuses clarifications, on the
+    reasoning that the question we asked carries no slots. That is true of the
+    question and false of the reply to it, which had nowhere to go.
+    """
+    from orchestrator.session import SessionStore, Turn
+    from orchestrator.turn import _answer_to_clarification
+
+    store = SessionStore()
+    asked = Intent(query_type=QueryType.SAFETY_ASSESS, raw_query="tell me safest route")
+    store.record(
+        "s1",
+        Turn(
+            turn_id="t1",
+            query="tell me safest route",
+            intent=asked,
+            state="clarification",
+            missing_slots=["spatial_reference", "vessel_class"],
+        ),
+    )
+
+    pending = store.pending_question("s1")
+    assert pending is not None, "a clarification must be retrievable as a pending question"
+
+    merged = _answer_to_clarification("mechanised_trawler", pending)
+    assert merged is not None
+    assert merged.vessel_class is VesselClass.MECHANISED_TRAWLER
+    assert merged.spatial_reference is None, "only the slot that was answered"
+
+    # And the second reply completes it rather than starting over.
+    store.record(
+        "s1",
+        Turn(
+            turn_id="t2",
+            query="mechanised_trawler",
+            intent=merged,
+            state="clarification",
+            missing_slots=["spatial_reference"],
+        ),
+    )
+    done = _answer_to_clarification("Nagapattinam", store.pending_question("s1"))
+    assert done.spatial_reference.name == "Nagapattinam"
+    assert done.vessel_class is VesselClass.MECHANISED_TRAWLER
+    assert done.blocking_gaps() == []
+
+
+def test_a_reply_that_answers_nothing_is_planned_as_a_fresh_question():
+    """The user changed the subject. Forcing the reply into the old question
+    would answer something nobody asked."""
+    from orchestrator.session import Turn
+    from orchestrator.turn import _answer_to_clarification
+
+    pending = Turn(
+        turn_id="t1",
+        query="safe?",
+        intent=Intent(query_type=QueryType.SAFETY_ASSESS, raw_query="safe?"),
+        state="clarification",
+        missing_slots=["spatial_reference", "vessel_class"],
+    )
+    assert _answer_to_clarification("why has my catch declined?", pending) is None
+
+
+def test_a_stale_clarification_is_not_treated_as_pending():
+    """A reply an hour later is a new conversation, not a slot value."""
+    from datetime import datetime, timedelta, timezone
+
+    from orchestrator.session import PENDING_TTL_MINUTES, SessionStore, Turn
+
+    store = SessionStore()
+    store.record(
+        "s1",
+        Turn(
+            turn_id="t1",
+            query="safe?",
+            intent=Intent(query_type=QueryType.SAFETY_ASSESS, raw_query="safe?"),
+            state="clarification",
+            missing_slots=["vessel_class"],
+            created_at=datetime.now(timezone.utc)
+            - timedelta(minutes=PENDING_TTL_MINUTES + 5),
+        ),
+    )
+    assert store.pending_question("s1") is None
+
+
+def test_a_numeric_only_concern_cannot_destroy_an_answer():
+    """The number guard must not be able to break the thing it protects.
+
+    strip_numbers("3.5") is the empty string, Caveat requires min_length=1, and
+    building one raised -- taking the whole recommendation with it and
+    returning "the answer could not be assembled". Intermittent, because it
+    depended on what the model happened to write that turn.
+    """
+    import json
+    from unittest.mock import patch
+
+    from agents.deliberate import deliberate
+    from core.provenance import ToolCallLog
+    from core.schemas.recommendation import Caveat
+    from orchestrator.executor import ExecutionResult
+    from orchestrator.llm.client import LLMResult
+
+    reply = json.dumps(
+        {
+            "assessment": "2.5",
+            "requests": [],
+            "concerns": ["3.5", "28", "the zone lies far offshore for this boat"],
+        }
+    )
+    with patch(
+        "agents.deliberate.llm.complete",
+        return_value=LLMResult(ok=True, text=reply, provider="stub", model="stub"),
+    ):
+        thought = deliberate(
+            agents.agent_for("ocean"),
+            ExecutionResult(log=ToolCallLog("t")),
+            _intent(QueryType.PFZ_LOCATE),
+        )
+
+    assert all(c.strip() for c in thought.concerns), "no empty concern may survive"
+    assert len(thought.concerns) == 1
+    for concern in thought.concerns:
+        Caveat(text=concern)  # must not raise

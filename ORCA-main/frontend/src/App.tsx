@@ -174,7 +174,7 @@ export default function App() {
                 {message.text}
 
                 {r?.options && r.options.length > 0 && (
-                  <div className="options">
+                  <div className={`options${r.state === "chat" ? " suggest" : ""}`}>
                     {r.options.map((option) => (
                       <button key={option} onClick={() => send(option)}>
                         {option.replace(/_/g, " ")}

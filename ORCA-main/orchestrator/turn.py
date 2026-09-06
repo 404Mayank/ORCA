@@ -49,7 +49,7 @@ class TurnResult:
 
     turn_id: str
     state: str
-    """answer | clarification | refusal | error"""
+    """answer | chat | clarification | refusal | error"""
     answer: str = ""
     recommendation: Recommendation | None = None
     intent: Intent | None = None
@@ -92,6 +92,78 @@ class TurnResult:
         return str(self.recommendation.verdict.value.value)
 
 
+def _answer_to_clarification(query: str, pending) -> Intent | None:
+    """Merge a reply into the intent the pending question was asked about.
+
+    Returns None when the reply supplies nothing we asked for -- the user
+    changed the subject, and it should be planned as a fresh question rather
+    than forced into the old one.
+
+    Extraction is deterministic: the gazetteer and the configured vessel
+    classes, plus an exact match on an option value, because the UI renders
+    those options as buttons and a click sends the value verbatim.
+    """
+    from agents import keyword_intent
+    from core.schemas.intent import SpatialReference, VesselClass
+
+    intent = pending.intent
+    updates: dict[str, Any] = {}
+    text = query.strip().lower()
+
+    if intent.spatial_reference is None:
+        place = keyword_intent.extract_place(query)
+        if place:
+            updates["spatial_reference"] = SpatialReference(name=place)
+
+    if intent.vessel_class is None:
+        vessel = keyword_intent.extract_vessel_class(query)
+        if vessel is None:
+            # An option button sends its value verbatim, e.g. "frp_9m".
+            vessel = next((v.value for v in VesselClass if v.value == text), None)
+        if vessel:
+            updates["vessel_class"] = VesselClass(vessel)
+
+    if not updates:
+        return None
+
+    filled = list(updates)
+    return intent.model_copy(
+        update={
+            **updates,
+            "raw_query": query,
+            # Recorded so synthesis surfaces them as stated assumptions. The
+            # user supplied these, but not in this turn's words.
+            "inherited_slots": sorted(set(intent.inherited_slots) | set(filled)),
+            "missing_slots": [s for s in intent.missing_slots if s not in filled],
+        }
+    )
+
+
+def _plan_from_intent(intent: Intent) -> "PlanningResult":
+    """Plan a fully-formed intent without asking the model again.
+
+    The query type is already known -- it came from the question we asked --
+    so the planner has nothing left to interpret. Going back to it would spend
+    a call to be told what we already established, and risk it reclassifying a
+    one-word reply.
+
+    The slot gate still runs: if the reply filled only one of two missing
+    slots, this returns a clarification for the rest rather than guessing.
+    """
+    from agents.intent_planner_agent import PlanningResult, _force_clarification, _use_fallback
+
+    gaps = intent.blocking_gaps()
+    if gaps:
+        return PlanningResult(
+            output=_force_clarification(intent, gaps),
+            attempts=0,
+            notes=[f"answered from a clarification; still missing {gaps}"],
+        )
+    return _use_fallback(
+        intent, ["answered from a clarification; slots complete"], 0, "session", ""
+    )
+
+
 def run_turn(
     query: str,
     session_id: str | None = None,
@@ -105,9 +177,26 @@ def run_turn(
     """
     started = datetime.now(timezone.utc)
     turn_id = _next_turn_id()
-    context = SESSIONS.context_for(session_id)
 
-    planning = plan_query(query, context=context)
+    # A reply to a question we asked is not a new question.
+    #
+    # When the previous turn was a clarification, this turn is the answer to it
+    # and carries the slot we were missing. Merging it here -- before the
+    # planner sees a bare "mechanised_trawler" with no context -- is what stops
+    # the loop where the same question is asked forever.
+    pending = SESSIONS.pending_question(session_id)
+    merged = _answer_to_clarification(query, pending) if pending else None
+
+    if merged is not None:
+        planning = _plan_from_intent(merged)
+    else:
+        planning = plan_query(
+            query,
+            context=SESSIONS.context_for(session_id),
+            history=SESSIONS.recent(session_id),
+            dialogue=SESSIONS.conversation(session_id),
+            awaiting=pending.answer if pending else None,
+        )
     intent = planning.output.intent
     notes = list(planning.notes)
 
@@ -124,6 +213,7 @@ def run_turn(
                 state=result.state,
                 answer=result.answer,
                 verdict=result.verdict,
+                missing_slots=result.missing_slots,
             ),
         )
         return result
@@ -136,6 +226,21 @@ def run_turn(
         used_fallback_plan=planning.used_fallback,
         notes=notes,
     )
+
+    # -- the planner just talked -------------------------------------------
+    #
+    # No tools ran, so there is nothing to verify and nothing to narrate. The
+    # suggestions ride in `options`, which the UI already renders as buttons.
+    if planning.state == "chat":
+        reply = planning.output.chat
+        return finish(
+            TurnResult(
+                state="chat",
+                answer=reply.text if reply else "What would you like to know?",
+                options=list(reply.suggestions) if reply else [],
+                **base,
+            )
+        )
 
     # -- the planner asked, or refused -------------------------------------
     if planning.state == "clarification":
@@ -219,7 +324,11 @@ def run_turn(
         recommendation = recommendation.model_copy(
             update={
                 "caveats": list(recommendation.caveats)
-                + [Caveat(text=concern) for concern in teamwork.concerns]
+                + [
+                    Caveat(text=concern)
+                    for concern in teamwork.concerns
+                    if concern and concern.strip()
+                ]
             }
         )
 

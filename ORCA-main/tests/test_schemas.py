@@ -168,8 +168,29 @@ def test_a_failed_safety_check_can_never_produce_a_go():
         "computed_by": "tc_007",
         "limiting_driver": None,
     }
-    with pytest.raises(ValidationError, match="cannot produce a clean go"):
+    with pytest.raises(ValidationError, match="cannot produce the top verdict"):
         Recommendation.model_validate(payload)
+
+
+def test_degradation_short_of_failure_does_not_block_a_go():
+    """Narrowed on 2026-09-07, and the reason matters.
+
+    The rule used to block on the generic ``degraded`` flag, which the executor
+    raises for any degraded step -- including ones a safety verdict never
+    reads. When an agent voluntarily added a boundary check to a safety
+    question, that check came back degraded (IMBL geometry present, MPA
+    absent), and checking **more** turned a valid go into a crash.
+
+    A failed call still blocks; see the test above. This pins the other half.
+    """
+    payload = build_ideal_safety_answer().model_dump(mode="json")
+    payload["degraded"] = True
+    payload["degradation_notes"] = ["geofence_check has no MPA geometry"]
+    assert all(e["status"] != "failed" for e in payload["evidence"])
+
+    recommendation = Recommendation.model_validate(payload)
+    assert recommendation.degraded
+    assert recommendation.verdict.value.value in {"go", "marginal", "no_go"}
 
 
 def test_model_copy_does_not_skip_validation_in_our_fixtures():

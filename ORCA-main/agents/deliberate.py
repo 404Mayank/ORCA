@@ -77,6 +77,10 @@ _NUMBER = re.compile(r"\d[\d,]*\.?\d*")
 #: that returns eleven requests has not prioritised; it has listed.
 MAX_REQUESTS = 3
 
+#: Below this a stripped concern is not a sentence. Anything shorter is what
+#: remains of a number after the guard ran, and shows the user nothing.
+_MIN_CONCERN_CHARS = 12
+
 
 @dataclass
 class Deliberation:
@@ -244,7 +248,16 @@ def deliberate(
         agent=agent.name,
         assessment=strip_numbers(assessment)[:300],
         requests=requests,
-        concerns=[strip_numbers(c)[:200] for c in concerns if c.strip()][:3],
+        # Filtered AFTER stripping, not before. A concern that is mostly digits
+        # -- "waves 3.5 m, gusts 28 kn" -- strips down to punctuation or to
+        # nothing at all, and an empty Caveat fails validation and takes the
+        # whole recommendation with it. The guard exists to make answers safe;
+        # it must not be able to destroy one.
+        concerns=[
+            stripped
+            for c in concerns
+            if len(stripped := strip_numbers(str(c))[:200]) >= _MIN_CONCERN_CHARS
+        ][:3],
         ok=True,
         model=completion.model,
     )

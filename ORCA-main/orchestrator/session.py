@@ -100,9 +100,13 @@ class Turn:
         rather than as an error, which is why it survived until a live
         two-question session was actually tried.
         """
+        # "error" is included deliberately. A turn that resolved a place and a
+        # vessel and then failed in synthesis still established those slots --
+        # the user said them, and making them say it again because our
+        # assembly step raised is our failure charged to them.
         return (
             self.intent is not None
-            and self.state == "answer"
+            and self.state in ("answer", "error")
             and self.age_minutes <= CONTEXT_TTL_MINUTES
         )
 
@@ -134,6 +138,50 @@ class SessionStore:
                     return turn.intent
             return None
 
+    def recent(self, session_id: str | None, limit: int = 3) -> list[tuple[str, str]]:
+        """Recent (question, classified type) pairs, oldest first.
+
+        Given to the planner so it can resolve "there" and "the day after".
+        Deliberately not the answers: the model needs to know what was *asked*,
+        and handing it previous verdicts invites it to repeat one.
+        """
+        if not session_id:
+            return []
+        with self._lock:
+            turns = self._sessions.get(session_id) or []
+            return [
+                (t.query, t.intent.query_type.value)
+                for t in turns[-limit:]
+                if t.intent is not None
+            ]
+
+    def conversation(self, session_id: str | None, limit: int = 4) -> list[dict[str, str]]:
+        """Recent turns as a dialogue, for conversational replies.
+
+        Distinct from :meth:`recent`, which is for *planning* and deliberately
+        withholds the answers -- handing a planner a previous verdict invites it
+        to repeat one.
+
+        A chat reply has the opposite need: it cannot refer to what was just
+        discussed without being told. So this includes what was said back, but
+        **only for turns that produced no verdict** (chat and clarification).
+        An answered safety turn still contributes its question alone, for the
+        same reason ``recent`` gives only questions.
+        """
+        if not session_id:
+            return []
+        with self._lock:
+            turns = self._sessions.get(session_id) or []
+            out: list[dict[str, str]] = []
+            for t in turns[-limit:]:
+                entry = {"user": t.query}
+                if t.state in ("chat", "clarification") and t.answer:
+                    entry["you_replied"] = t.answer[:220]
+                elif t.state == "answer":
+                    entry["you_replied"] = f"(answered their {t.intent.query_type.value} question)" if t.intent else "(answered)"
+                out.append(entry)
+            return out
+
     def pending_question(self, session_id: str | None) -> Turn | None:
         """The clarification this session is still waiting on an answer to.
 
@@ -153,8 +201,26 @@ class SessionStore:
             turns = self._sessions.get(session_id)
             if not turns:
                 return None
-            last = turns[-1]
-            if last.state != "clarification" or last.intent is None:
+            # Look past chat turns, not just at the last one.
+            #
+            # "Where can I go fishing?" -> "From which landing centre?" ->
+            # "tell me". The reply named no port, so it was planned fresh and
+            # came back as small talk -- and the question we had asked
+            # evaporated, because only the immediately preceding turn was
+            # examined and that turn was now the chat. The user was left in a
+            # conversation where we had asked something and then forgotten it.
+            # Seen 2026-09-07.
+            #
+            # A chat turn answers nothing and fills no slot, so it cannot
+            # cancel an outstanding question. Anything else -- an answer, a
+            # refusal, a fresh clarification -- does.
+            last = None
+            for turn in reversed(turns):
+                if turn.state == "chat":
+                    continue
+                last = turn
+                break
+            if last is None or last.state != "clarification" or last.intent is None:
                 return None
             # A question from an hour ago is not one the user is still
             # answering; treat a late reply as a fresh request.

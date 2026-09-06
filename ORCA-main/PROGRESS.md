@@ -2,9 +2,107 @@
 
 Living status document. Updated as work lands, not as it is planned.
 
-**Last updated:** 2026-09-06 · **Tests:** 339 passing, 5 skipped · **Head:** Phase 4 · **Tools:** 14/14 · **LLM:** Groq, 2 keys
+**Last updated:** 2026-09-07 · **Tests:** 347 passing, 5 skipped · **Head:** Phase 4 · **Tools:** 14/14 · **LLM:** Groq, 4 keys
 
 ---
+
+## What landed on 2026-09-07 (later) — the conversation belongs to the model
+
+The morning's `chat` state fixed the loop but replaced it with a subtler
+version of the same mistake: every turn the system could not place became a
+**fixed paragraph**, chosen by a hardcoded word list. One live session made the
+problem impossible to miss.
+
+```
+hello   ->    0 ms   canned paragraph, identical every time
+alloo   -> 1559 ms   "Hello! How can I help you with your fishing plans today?"
+```
+
+Same kind of turn. The good reply is the model's; "alloo" only got it because
+it was **missing from the word list** and fell through. That is the whole
+argument against the design, produced by the design itself.
+
+Worse, three turns in that session -- including **"what is safest route for my
+vessel"** and **"fishing zones ??"**, both squarely in scope -- came back with
+the same canned paragraph. Their latencies gave it away: ~4500 ms against
+~1500 ms for the turns that worked, i.e. call, parse failure, retry, parse
+failure, give up. The model had understood them. A schema error threw its
+answers away.
+
+### What changed
+
+| | |
+|---|---|
+| Gate 0 | no longer answers greetings. It withholds `carry_these_slots` -- the part that was actually load-bearing -- and lets the model reply |
+| `_chat_via_llm` | when the planner's JSON cannot be parsed twice, the model is asked again **with the schema removed**. It is demonstrably up; only the shape was unusable |
+| `parse_planner_json` | a `suggestions` list longer than four is **trimmed**, not rejected. A layout limit must not fail like a safety limit |
+| `SessionStore.conversation()` | real dialogue -- what was asked and what we said back -- reaches the planner. Verdicts still withheld, so it cannot repeat one |
+| `SessionStore.pending_question()` | looks **past** chat turns. Small talk answers nothing, so it cannot cancel a question we asked |
+| offline message | says "I cannot reach my language model", because that is now the only case that reaches it |
+
+`CAPABILITIES` and `SUGGESTIONS` survive as the no-provider tier only. The
+keyword classifier stays where CLAUDE.md always put it: below Ollama, reached
+only when nothing else can run.
+
+### What did not change
+
+Every number, and every verdict. `strip_numbers()` still runs on every chat
+reply and still fails loudly, because that guard is about truth rather than
+about fitting on screen. The model chooses what to look up and how to say it;
+code decides what is true. The last turn of that session printed **"15 numbers
+verified"**, and that sentence is only true because code produced all fifteen.
+
+## What landed on 2026-09-07 (earlier) — the system can hold a conversation
+
+The planner had **three** states: `plan`, `clarification`, `refusal`. There was
+no way for ORCA to simply *talk*. Every turn that was not one of the four marine
+queries fell through to the safety slot gate, so:
+
+* "hello" was answered with *"Which landing centre are you leaving from, and
+  what kind of boat is it?"*
+* answering it half-way ("kattumaram") asked the other half
+* typing anything unrecognised ("alloo") restarted the whole question
+
+The user could only ever click a sample query. Reported with a screenshot.
+
+**The fix is a fourth state, `chat`.** The planner may now decide that a turn
+needs no tools at all and reply in its own voice, with up to four suggested
+questions the UI renders as buttons.
+
+| | |
+|---|---|
+| `core/schemas/intent.py` | `ChatReply`; `PlannerOutput.state` gains `"chat"`, still exactly-one-of |
+| `agents/prompts/planner.md` | when to chat vs. plan vs. refuse; a chat reply may contain no numbers |
+| `agents/intent_planner_agent.py` | `_chat()` applies `strip_numbers`; Gate 0 answers greetings locally; Gate 0b returns a chat turn before inheritance or the slot gate |
+| `orchestrator/turn.py` | `state == "chat"` returns the reply, suggestions in `options` |
+| `frontend/` | `.options.suggest` — sentence-case buttons, because uppercase monospace makes a sentence look like an error code |
+
+Three things worth noting about how it is wired:
+
+* **A greeting costs no LLM call.** Gate 0 catches it and answers from
+  `CAPABILITIES`. `attempts == 0` is asserted in a test.
+* **A chat reply is number-stripped.** It calls no tool, so it reaches no
+  evidence block, so any figure in it is unverifiable by construction. The
+  governing rule reaches the conversational path too.
+* **The no-LLM tier chats as well.** With both Groq keys rate limited and no
+  keyword match, the honest answer is "I did not catch what you need" plus what
+  we can do — not an interrogation about a safety question nobody asked.
+
+Two things that bit on the way, both now covered by tests:
+
+* **The model returned `query_type: null` on a chat turn** — correct, since a
+  greeting is none of the four types, and unrepresentable, since a required enum
+  has no "none of these" member. The parse failed, the retry failed identically,
+  and a question the model had understood perfectly came back as "I did not
+  catch what you need". The parser now fills a placeholder **on the chat state
+  only**; every other state still rejects a null loudly.
+* **Groq's free tier meters tokens per day per model, per _organization_ — not
+  per key.** Three keys from one account reported the same org and the same
+  exhausted 200k pool. Extra keys spread burst rate; they do not buy a second
+  day's tokens. A key from a different account does. Four are configured.
+
+Chat turns are deliberately **not** inheritable: they fill no slots, so a
+follow-up cannot pick up a place or a boat from one.
 
 ## What landed on 2026-09-06
 
@@ -199,6 +297,8 @@ Also done: `orchestrator/executor.py`, `core/provenance.py`,
 | Ollama offline tier | ⬜ backend written, not exercised |
 | Groq tier | ✅ **live**, `openai/gpt-oss-120b`, planner + narrator |
 | Multi-turn session state | ✅ live-verified 2026-09-06; slots carried **and recorded** |
+| Clarification answering | ✅ a reply fills the slot it answered; the next question asks only for what is still missing |
+| Conversational follow-ups | ✅ slots carry and update; the query type is re-read every turn, with or without an LLM |
 | Four domain agents (ocean, weather, geospatial, risk) | ✅ `agents/base.py` + one file each, deterministic |
 | Plan composition from agents | ✅ `compose_plan()`; all four query types validate |
 | **Inter-agent collaboration** | ✅ `orchestrator/collaborate.py` — review → request → extend → re-execute |
@@ -337,6 +437,12 @@ currently says things like `bbox.yaml#reference_points`.
 | The replay printed the **sustained mean** beside a verdict driven by the **gust**, so a correct answer read as "14 kn is over the 25 kn limit" | reading the first replay table |
 | Typing **"hello"** after a fishing-zone question returned a full fishing-zone answer — context inheritance manufactured a request the user never made | a user typing hello into the UI |
 | A fishing-zone answer opened **"Do not go out until you check the safety forecast"** — the narrator prompt only described safety answers, so a caveat was promoted to the lead and read as a refusal | the same screenshot |
+| **An infinite clarification loop.** Asked which port and which boat, the user clicked MECHANISED TRAWLER and was asked the identical question again, forever. `context_for` refuses clarifications by design — correct for the question, wrong for the *reply* to it, which had nowhere to go | clicking an option button in the UI |
+| A concern that was mostly digits stripped to the empty string, `Caveat` requires `min_length=1`, and the exception took the whole recommendation with it — "the answer could not be assembled". Intermittent, since it depended on what the model wrote | the same session, one turn later |
+| **The query type was carried between turns.** Asked "why has the catch dropped there?" after a fishing-zone question, three turns running answered the fishing-zone question again. The planner was handed `previous_turn.query_type` as neutral context and did the natural thing | running a six-turn conversation |
+| The no-LLM fallback copied the previous intent wholesale, so a rate-limited turn answered the previous question — the failure above, surviving even after the prompt was fixed | the same conversation, rate limited |
+| `_degraded_cannot_be_go` blocked on the generic `degraded` flag, so when an agent voluntarily added a boundary check (degraded: IMBL present, MPA absent), **checking more turned a valid `go` into a crash** | the first turn of that conversation |
+| Synthesis wrote `abs(anomaly_sigma)` into a claim — a number no tool produced. **The verifier caught it** and refused to show the answer, which is exactly its job, and it does not care that the transformation was ours rather than a model's | the fifth turn |
 
 ---
 

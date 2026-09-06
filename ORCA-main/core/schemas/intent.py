@@ -35,6 +35,7 @@ __all__ = [
     "ClarificationRequest",
     "RefusalReason",
     "Refusal",
+    "ChatReply",
     "SAFETY_CRITICAL_SLOTS",
 ]
 
@@ -271,8 +272,35 @@ class Refusal(BaseModel):
     )
 
 
+class ChatReply(BaseModel):
+    """A conversational answer that needs no tools.
+
+    The system used to have three states -- plan, clarification, refusal -- and
+    no way to simply *talk*. Every turn that was not one of the four marine
+    queries fell through to "which landing centre are you leaving from, and what
+    kind of boat is it?", so "hello" was answered with an interrogation and
+    typing anything unrecognised restarted it. Found live on 2026-09-07.
+
+    A chat reply is the model speaking in its own voice about what it is and
+    what it can do. It carries no verdict, calls no tool, and reaches no
+    evidence block, so the governing rule applies with full force: **it may not
+    contain a number**. ``strip_numbers`` enforces that at the boundary, for the
+    same reason it does on agent concerns -- prose is exactly where an invented
+    figure looks most authoritative.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, description="What to say back, in plain English.")
+    suggestions: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description="Questions the user could ask next, rendered as buttons.",
+    )
+
+
 class PlannerOutput(BaseModel):
-    """Exactly one of three states, enforced.
+    """Exactly one of four states, enforced.
 
     The single LLM call returns this. ``validate_plan()`` runs on ``plan``
     before anything executes; the other two states bypass execution entirely.
@@ -281,9 +309,10 @@ class PlannerOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     intent: Intent
-    state: Literal["plan", "clarification", "refusal"]
+    state: Literal["plan", "clarification", "refusal", "chat"]
     clarification: ClarificationRequest | None = None
     refusal: Refusal | None = None
+    chat: ChatReply | None = None
     # `plan` is typed as Any here to keep this module free of a plan.py import
     # and preserve the one-directional import order. orchestrator/ re-parses it
     # into a Plan before validation.
@@ -295,6 +324,7 @@ class PlannerOutput(BaseModel):
             "plan": self.plan is not None,
             "clarification": self.clarification is not None,
             "refusal": self.refusal is not None,
+            "chat": self.chat is not None,
         }
         if not present[self.state]:
             raise ValueError(f"state is '{self.state}' but the {self.state} block is missing.")

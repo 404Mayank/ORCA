@@ -45,21 +45,20 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Scanlines and vignette, both under 3%. This should read as a screen, not as
-   a filter over one. */
+/* Scanlines only. There was a radial vignette here too, darkening the edges
+   toward black; it made the page look dirty rather than atmospheric and it hid
+   the corners of the panels. Removed. */
 body::after {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 9;
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      rgba(255, 255, 255, 0.018) 0 1px,
-      transparent 1px 3px
-    ),
-    radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(0, 0, 0, 0.75) 100%);
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.018) 0 1px,
+    transparent 1px 3px
+  );
 }
 
 ::selection { background: var(--accent); color: #001210; }
@@ -249,6 +248,17 @@ body::after {
 }
 .options button:hover { background: var(--accent); color: #001210; }
 
+/* A clarification's options are single tokens ("FRP 9M") and read well shouted.
+   A chat reply's suggestions are whole sentences, and uppercase monospace makes
+   a sentence look like an error code. */
+.options.suggest button {
+  font: 400 12px var(--body);
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  padding: 7px 12px;
+}
+
 .meta {
   margin-top: 11px;
   padding-top: 9px;
@@ -392,9 +402,10 @@ body::after {
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background:
-    linear-gradient(rgba(6, 26, 24, 0.42), rgba(6, 26, 24, 0.42)),
-    radial-gradient(90% 70% at 50% 50%, transparent 40%, rgba(0, 0, 0, 0.6) 100%);
+  /* A flat tint, not a vignette. The radial black that used to sit on top of
+     this darkened the map edges into mush -- exactly where the coastline and
+     the boundary lines are. */
+  background: linear-gradient(rgba(6, 26, 24, 0.42), rgba(6, 26, 24, 0.42));
   mix-blend-mode: multiply;
 }
 .maplibregl-ctrl-group {

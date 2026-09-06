@@ -926,14 +926,23 @@ def _build_causal(result: ExecutionResult, intent: Intent, turn_id: str) -> Reco
             Claim(
                 id="chl_baseline",
                 kind=ClaimKind.DERIVED,
+                # The SIGNED sigma, not its magnitude.
+                #
+                # This read abs(chl.anomaly_sigma) and paired it with a
+                # "below"/"above" word, which is more natural English and is a
+                # number the tool never produced. The verifier caught it:
+                # "asserts 0.27 but no cited call returned a value that rounds
+                # to it". Transforming a figure after it leaves the tool is
+                # precisely what the verifier exists to stop, and it does not
+                # care that the transformation was ours rather than a model's.
                 template=(
-                    "The {month} average here is {mean} mg/m3, so today is "
-                    "{sigma} standard deviations {direction} normal."
+                    "The {month} average here is {mean} mg/m3, and today is "
+                    "{sigma} standard deviations from it ({direction} normal)."
                 ),
                 slots={
                     "month": chl.month,
                     "mean": chl.climatology_mean,
-                    "sigma": abs(chl.anomaly_sigma),
+                    "sigma": chl.anomaly_sigma,
                     "direction": direction,
                 },
                 evidence=[chl_id] if chl_id else [],

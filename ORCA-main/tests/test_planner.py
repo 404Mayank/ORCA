@@ -64,7 +64,10 @@ def _stub_sequence(monkeypatch, *responses):
     calls = iter(responses)
 
     def fake_complete(role, system, user):
-        assert role == "planner"
+        # "planner" for the structured call and its retry; "deliberator" for
+        # the conversational retry that follows a schema failure, which runs
+        # on the cheaper model because it asks for a sentence, not a DAG.
+        assert role in ("planner", "deliberator"), role
         item = next(calls)
         if isinstance(item, LLMResult):
             return item
@@ -263,13 +266,21 @@ def test_keyword_tier_never_invents_a_place_or_a_boat(monkeypatch):
 def test_an_unclassifiable_question_still_falls_through_to_asking(monkeypatch):
     """A vague request with no model and no context becomes a question.
 
-    The example used to be "hello there", which Gate 0 now catches earlier as a
-    greeting -- a more specific answer to the same situation. This one is not a
-    pleasantry, so it reaches the keyword tier and finds nothing there either.
+    "Falls through to asking" used to mean "asks which landing centre and what
+    boat". That was wrong and it is what produced the loop reported on
+    2026-09-07: an unrecognised turn was answered with an interrogation about a
+    safety question the user had not asked, and every reply that did not name a
+    port or a boat asked it again.
+
+    With no model, no context and no keyword match, the honest thing is to say
+    so and offer the four things we can do. No tool runs either way.
     """
     _stub_sequence(monkeypatch, LLMResult(ok=False, error="connection refused"))
     result = plan_query("can you tell me something about that")
-    assert result.state == "clarification"
+    assert result.state == "chat"
+    assert result.plan is None
+    assert result.output.chat is not None
+    assert result.output.chat.suggestions, "an unrecognised turn must offer a way forward"
     assert any("inconclusive" in n for n in result.notes)
 
 
@@ -280,9 +291,16 @@ def test_unparseable_response_is_retried_once_then_falls_back(monkeypatch):
         spatial_reference=SpatialReference(name="Nagapattinam"),
         vessel_class=VesselClass.FRP_9M,
     )
-    _stub_sequence(monkeypatch, "I'd be happy to help! Here's my thinking...", "still not json")
+    # Three replies: the planner call, its retry, and the conversational
+    # retry that now runs before the model is given up on. All three are
+    # unusable here, so the deterministic tier still takes over.
+    _stub_sequence(
+        monkeypatch,
+        "I'd be happy to help! Here's my thinking...",
+        "still not json",
+        LLMResult(ok=False, error="rate limited"),
+    )
     result = plan_query("and tomorrow?", context=previous)
-    assert result.attempts == 2
     assert result.state == "plan"
     assert result.used_fallback
 
@@ -480,14 +498,100 @@ def test_a_greeting_does_not_inherit_the_previous_question(monkeypatch):
     # No stub: the gate must fire before the model is ever called.
     result = plan_query("hello", context=previous)
 
-    assert result.state == "clarification"
+    assert result.state == "chat"
     assert result.plan is None
     assert any("greeting" in note for note in result.notes)
+    # The point of the gate is that nothing from the previous turn survives it.
+    # (Checking the reply text cannot work -- "Rameswaram" is in the standing
+    # description of the coast we cover, and would be there for any greeting.)
+    assert result.output.intent.spatial_reference is None
+    assert result.output.intent.vessel_class is None
+    assert result.output.intent.inherited_slots == []
 
 
 @pytest.mark.parametrize("greeting", ["hello", "Hi!", "good morning", "thanks", "ok"])
-def test_pleasantries_are_all_caught(greeting):
-    assert plan_query(greeting).state == "clarification"
+def test_pleasantries_are_answered_not_interrogated(greeting, monkeypatch):
+    """Say hello back. Do not ask what boat they own.
+
+    Reported with a screenshot on 2026-09-07: "hello" was answered with "which
+    landing centre are you leaving from, and what kind of boat is it?", and the
+    conversation could not escape it.
+
+    This originally also asserted ``attempts == 0`` -- that the greeting was
+    answered without an LLM call, from a fixed paragraph. That was the wrong
+    thing to protect. The fixed paragraph was identical every turn, and the
+    word list deciding who got it had no entry for "alloo", so "alloo" reached
+    the model and got a visibly better reply than "hello" did. The greeting
+    now goes to the model like everything else; what must hold is that it is
+    *answered*, not interrogated.
+    """
+    _stub_sequence(
+        monkeypatch,
+        json.dumps(
+            {
+                "intent": {"query_type": None},
+                "state": "chat",
+                "chat": {"text": "Hello. What do you need?", "suggestions": ["Is it safe out?"]},
+            }
+        ),
+    )
+    result = plan_query(greeting)
+    assert result.state == "chat"
+    assert result.output.chat.text.strip()
+    assert result.plan is None
+
+
+def test_a_chat_turn_may_leave_the_query_type_null():
+    """A greeting is not one of the four types, and the model says so.
+
+    `Intent.query_type` is a required enum with no "none of these" member, so
+    the null the model correctly returned failed validation, the retry failed
+    identically, and the turn fell to the keyword tier -- which answered "I did
+    not catch what you need" to a question the model had understood perfectly.
+    Found live on 2026-09-07.
+    """
+    from agents.intent_planner_agent import parse_planner_json
+
+    out = parse_planner_json(
+        '{"intent": {"query_type": null}, "state": "chat",'
+        ' "chat": {"text": "I am ORCA.", "suggestions": ["Is it safe out?"]}}',
+        "who are you?",
+    )
+    assert out.state == "chat"
+    assert out.chat.text == "I am ORCA."
+
+
+def test_a_null_query_type_is_still_rejected_on_every_other_state():
+    """The placeholder is safe only because a chat turn never reaches planning.
+
+    A plan or a clarification with no query type is a real failure and must
+    still fail loudly.
+    """
+    import pytest as _pytest
+
+    from agents.intent_planner_agent import parse_planner_json
+
+    with _pytest.raises(Exception):
+        parse_planner_json(
+            '{"intent": {"query_type": null}, "state": "clarification",'
+            ' "clarification": {"missing_slots": ["vessel_class"],'
+            ' "question_template": "What boat?", "options": []}}',
+            "is it safe?",
+        )
+
+
+def test_a_chat_reply_can_never_carry_a_number():
+    """The governing rule reaches the conversational path too.
+
+    A chat turn calls no tool, so it reaches no evidence block, so any figure in
+    it is unverifiable by construction -- and prose is where an invented figure
+    reads as most authoritative.
+    """
+    from agents.intent_planner_agent import _chat
+
+    out = _chat("hi", "Waves are running at 2.8 m off Nagapattinam today.")
+    assert out.state == "chat"
+    assert not any(ch.isdigit() for ch in out.chat.text), out.chat.text
 
 
 @pytest.mark.parametrize(
