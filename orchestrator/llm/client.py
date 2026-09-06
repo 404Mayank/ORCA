@@ -57,12 +57,123 @@ def _models() -> dict:
 def provider_status() -> dict[str, bool]:
     """Which providers look usable right now. Cheap; no request is made."""
     return {
+        "opencode": bool(os.environ.get("OPENCODE_API_KEY", "").strip()),
         "groq": bool(os.environ.get("GROQ_API_KEY")),
         "anthropic": bool(
             os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
         ),
         "ollama": _ollama_reachable(),
     }
+
+
+# --------------------------------------------------------------------------
+# OpenCode Zen -- the unlimited tier
+# --------------------------------------------------------------------------
+#
+# Zen is an OpenAI-compatible gateway (https://opencode.ai/docs/zen/). Only
+# the /v1/chat/completions transport is used here -- the models routed to it
+# (kimi, deepseek, glm, minimax) speak plain OpenAI chat completions. The
+# /v1/responses (GPT/Grok) and /v1/messages (Claude) transports have different
+# response shapes and are deliberately NOT called; a non-chat-completions
+# shape is returned as ok=False rather than parsed optimistically.
+#
+# Model ids verified against the live public roster on 2026-09-07
+# (curl https://opencode.ai/zen/v1/models, no auth needed): kimi-k2.6,
+# deepseek-v4-flash and kimi-k2.5 are all listed. Re-list before a demo --
+# gateway rosters move, and an unlisted id fails as a quiet fall-through.
+#
+# Ordering note: `provider_order` lists opencode first, but an unconfigured
+# opencode costs nothing -- a missing/blank key returns ok=False before any
+# socket call, so offline/CI runs fall through instantly. The first-position
+# slot is intentional: when the key IS present this tier is unlimited and
+# should win; when absent the suite behaves exactly as before.
+
+_ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
+
+
+def _complete_opencode(role: Role, system: str, user: str) -> LLMResult:
+    key = os.environ.get("OPENCODE_API_KEY", "").strip()
+    if not key:
+        # Fast-fail with no network: every offline run and every existing
+        # test that mocks a later tier passes through here first.
+        return LLMResult(ok=False, provider="opencode", error="OPENCODE_API_KEY not set")
+
+    try:
+        spec = _models()["opencode"][role]
+        model = spec["model"]
+    except (KeyError, TypeError) as exc:
+        # Config error, not a transient one -- but complete() has no
+        # try/except around backends, so this must return, never raise,
+        # to honour the never-raises contract.
+        return LLMResult(ok=False, provider="opencode", error=f"no model configured for role {role!r}: {exc}")
+
+    body: dict = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": float(spec.get("temperature", 0.2)),
+        "max_completion_tokens": int(spec["max_tokens"]),
+    }
+    request = urllib.request.Request(
+        _ZEN_URL,
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": _UA,
+        },
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=float(_models()["limits"]["timeout_s"])
+        ) as r:
+            payload = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read()[:300].decode("utf-8", "replace")
+        if exc.code == 429:
+            # Sole key is spent: fall through to the next tier, do not retry
+            # Zen. complete() owns the fallback.
+            return LLMResult(ok=False, provider="opencode", model=model, error=f"rate limited: {detail}")
+        if exc.code == 401:
+            return LLMResult(ok=False, provider="opencode", model=model, error="invalid API key")
+        if exc.code == 403:
+            return LLMResult(ok=False, provider="opencode", model=model, error=f"forbidden (key or model access): {detail}")
+        return LLMResult(
+            ok=False, provider="opencode", model=model, error=f"HTTP {exc.code}: {detail}"
+        )
+    except urllib.error.URLError as exc:
+        return LLMResult(
+            ok=False, provider="opencode", model=model, error=f"connection: {exc.reason}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        return LLMResult(
+            ok=False, provider="opencode", model=model, error=f"{type(exc).__name__}: {exc}"
+        )
+
+    try:
+        choice = payload["choices"][0]
+        text = (choice["message"].get("content") or "").strip()
+        finish = choice.get("finish_reason")
+    except (KeyError, IndexError, TypeError):
+        return LLMResult(ok=False, provider="opencode", model=model, error=f"unexpected response shape: {str(payload)[:200]}")
+
+    if finish == "content_filter":
+        return LLMResult(ok=False, provider="opencode", model=model, error="refused by content filter")
+    if not text:
+        return LLMResult(ok=False, provider="opencode", model=model, error=f"empty response (finish_reason={finish})")
+
+    usage = payload.get("usage") or {}
+    return LLMResult(
+        ok=True,
+        text=text,
+        provider="opencode",
+        model=model,
+        input_tokens=usage.get("prompt_tokens"),
+        output_tokens=usage.get("completion_tokens"),
+    )
 
 
 # --------------------------------------------------------------------------
@@ -332,6 +443,7 @@ def complete(role: Role, system: str, user: str) -> LLMResult:
     models = _models()
     order = list(models.get("provider_order") or [models["provider"], models.get("fallback_provider")])
     backends = {
+        "opencode": _complete_opencode,
         "groq": _complete_groq,
         "anthropic": _complete_anthropic,
         "ollama": _complete_ollama,

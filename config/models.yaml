@@ -16,9 +16,12 @@
 # prompt instruction we hope holds -- it is enforced in code on both sides.
 
 # Tried in order; the first provider that returns a usable completion wins.
-# Groq first because it is the fast, cheap tier CLAUDE.md asks for and the key
-# we have. Anthropic if a key appears. Ollama when the venue loses internet.
-provider_order: [groq, anthropic, ollama]
+# Opencode Zen first because it is the unlimited tier when OPENCODE_API_KEY is
+# set -- and free when it is not: a missing key fast-fails with no socket call
+# (see _complete_opencode), so offline runs and the existing suite behave
+# exactly as before. Groq next as the fast cheap tier, Anthropic if a key
+# appears, Ollama when the venue loses internet.
+provider_order: [opencode, groq, anthropic, ollama]
 
 # Legacy single-provider fields, still honoured if provider_order is absent.
 provider: groq
@@ -79,6 +82,28 @@ ollama:
     model: "llama3.1:8b"
   deliberator:
     model: "llama3.1:8b"
+
+opencode:
+  # OpenCode Zen gateway, OpenAI-compatible chat completions only.
+  # https://opencode.ai/docs/zen/ -- key in OPENCODE_API_KEY.
+  # Model ids verified against the live public roster on 2026-09-07
+  # (GET https://opencode.ai/zen/v1/models, no auth). Re-list before a demo:
+  # gateway rosters move and an unlisted id fails as a silent fall-through.
+  planner:
+    # Strongest reasoning on the chat-completions transport; owns the DAG.
+    model: kimi-k2.6
+    temperature: 0.1
+    max_tokens: 4096
+  narrator:
+    # Fluent rewrite of an already-verified object; low temp, short leash.
+    model: kimi-k2.5
+    temperature: 0.2
+    max_tokens: 1024
+  deliberator:
+    # One call per active agent per turn: cheap and fast wins here.
+    model: deepseek-v4-flash
+    temperature: 0.1
+    max_tokens: 700
 
 limits:
   timeout_s: 30.0
