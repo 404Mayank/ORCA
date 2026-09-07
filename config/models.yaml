@@ -85,23 +85,21 @@ ollama:
     model: "llama3.1:8b"
 
 opencode:
-  # OpenCode Zen gateway: chat/completions AND responses transports, chosen
-  # per model id (muse-spark-*/gpt-*/grok-* -> responses, rest -> chat).
+  # OpenCode Zen gateway: free Spark ids only (contributor key serves no
+  # paid id here -- verified live 2026-09-07, paid ids 401). Paid and overflow
+  # ids live on opencode-go below. Transport per model id (spark ->
+  # responses, rest -> chat).
   # https://opencode.ai/docs/zen/ -- key in OPENCODE_API_KEY.
   # Chain ids verified against the live public roster on 2026-09-07
-  # (GET https://opencode.ai/zen/v1/models, no auth). There is no paid
-  # `muse-spark-1.3-contributor` id -- the paid 1.3 is `muse-spark-1.3`.
-  # Re-list before a demo: gateway rosters move and an unlisted id fails as
-  # a silent fall-through to the next id, then the next provider.
+  # (GET https://opencode.ai/zen/v1/models, no auth). Re-list before a demo:
+  # gateway rosters move and an unlisted id fails as a silent fall-through
+  # to the next id, then the next provider.
   #
   # PRIVACY: *-contributor-free ids train on prompts/completions (Zen docs).
   # Fine for fishermen queries; prefer paid siblings for anything sensitive.
   models:
     - muse-spark-1.3-contributor-free
-    - muse-spark-1.3
     - muse-spark-1.2-contributor-free
-    - muse-spark-1.2
-    - deepseek-v4-flash
   planner:
     temperature: 0.1
     max_tokens: 4096
@@ -115,10 +113,14 @@ opencode:
     max_tokens: 700
 
 opencode-go:
-  # Second Zen gateway (https://opencode.ai/zen/go/v1), chat/completions
-  # only. Key in OPENCODE_GO_API_KEY. Chain confirmed against served-model
-  # metadata: deepseek-v4-flash, then glm-5.3-flash as the last fallback.
+  # Second Zen gateway (https://opencode.ai/zen/go/v1), both transports:
+  # spark contributor (paid) ids ride /responses, the rest chat/completions.
+  # Key in OPENCODE_GO_API_KEY. Chain verified live 2026-09-07 against served
+  # ids (1.3-contributor + 1.2-contributor answer on /responses; deepseek +
+  # glm-flash on chat/completions); quota confirmed on all four.
   models:
+    - muse-spark-1.3-contributor
+    - muse-spark-1.2-contributor
     - deepseek-v4-flash
     - glm-5.3-flash
   planner:

@@ -98,6 +98,7 @@ def provider_status() -> dict[str, bool]:
 _ZEN_CHAT_URL = "https://opencode.ai/zen/v1/chat/completions"
 _ZEN_RESPONSES_URL = "https://opencode.ai/zen/v1/responses"
 _ZEN_GO_URL = "https://opencode.ai/zen/go/v1/chat/completions"
+_ZEN_GO_RESPONSES_URL = "https://opencode.ai/zen/go/v1/responses"
 
 #: Model id prefixes served on the Responses transport. Everything else on a
 #: Zen-family gateway uses chat/completions. Prefix routing, not per-model
@@ -254,9 +255,9 @@ def _complete_opencode_go(role: Role, system: str, user: str) -> LLMResult:
         return LLMResult(ok=False, provider="opencode-go", error=f"no model chain configured: {exc}")
     if not models:
         return LLMResult(ok=False, provider="opencode-go", error="no model chain configured")
-    # Go gateway speaks chat/completions only (confirmed via served model
-    # metadata); force that transport for every id in its chain.
-    return _complete_chain("opencode-go", key, models, role, system, user, _ZEN_GO_URL, None)
+    # Go serves both transports (/responses verified live for the spark
+    # contributor ids); URL chosen per model id like Zen.
+    return _complete_chain("opencode-go", key, models, role, system, user, _ZEN_GO_URL, _ZEN_GO_RESPONSES_URL)
 
 
 

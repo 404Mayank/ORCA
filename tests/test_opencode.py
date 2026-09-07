@@ -127,17 +127,13 @@ def test_chain_falls_to_next_id_with_per_id_transport(monkeypatch):
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     script = _Script(
         _http_error(429, "https://opencode.ai/zen/v1/responses"),
-        _http_error(429, "https://opencode.ai/zen/v1/responses"),
-        _http_error(429, "https://opencode.ai/zen/v1/responses"),
-        _http_error(429, "https://opencode.ai/zen/v1/responses"),
-        _chat_payload("via deepseek"),
+        _responses_payload("via second free"),
     )
     monkeypatch.setattr("urllib.request.urlopen", script)
     result = client._complete_opencode("deliberator", "sys", "user")
-    assert result.ok and result.model == "deepseek-v4-flash"
+    assert result.ok and result.model == "muse-spark-1.2-contributor-free"
     assert script.bodies()[0]["model"] == "muse-spark-1.3-contributor-free"
-    assert script.urls()[:4] == ["https://opencode.ai/zen/v1/responses"] * 4
-    assert script.urls()[4] == "https://opencode.ai/zen/v1/chat/completions"
+    assert script.urls() == ["https://opencode.ai/zen/v1/responses"] * 2
 
 
 def test_invalid_key_is_terminal_for_the_gateway(monkeypatch):
@@ -149,7 +145,7 @@ def test_invalid_key_is_terminal_for_the_gateway(monkeypatch):
     assert len(script.requests) == 1, "a bad key must not walk the chain"
 
 
-def test_late_401_walks_on_for_free_ids(monkeypatch):
+def test_late_401_walks_on(monkeypatch):
     # A contributor-scoped key 401s on paid siblings but serves free ids.
     # Found live: only a first-id 401 is terminal. Measured 2026-09-07.
     monkeypatch.setenv("OPENCODE_API_KEY", "contributor-key")
@@ -160,20 +156,30 @@ def test_late_401_walks_on_for_free_ids(monkeypatch):
 
     calls = []
 
+    _env_off(monkeypatch)
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
+
     def _mixed(request, *args, **kwargs):
         calls.append(json.loads(request.data.decode())["model"])
         if len(calls) == 1:
             raise _http_error(429)
         if len(calls) == 2:
             raise _http_error(401, body="not entitled")
-        return _FakeResponse(_responses_payload("via later free"))
+        if len(calls) == 3:
+            # Wrong transport for a chat id: shape error, walk on.
+            return _FakeResponse(_responses_payload("unreachable"))
+        return _FakeResponse(_chat_payload("via glm"))
 
     monkeypatch.setattr("urllib.request.urlopen", _mixed)
-    result = client._complete_opencode("planner", "sys", "user")
-    assert result.ok and result.model == "muse-spark-1.2-contributor-free"
+    result = client._complete_opencode_go("planner", "sys", "user")
+    # Go chain: paid 1.3 ok? No -- scripted 429 then 401 then... third call
+    # returns a responses payload for deepseek (wrong transport) -> shape
+    # error, then glm ok. Assert the walk, not the shortcut.
+    assert calls[0] == "muse-spark-1.3-contributor"
+    assert result.ok and result.model == "glm-5.3-flash"
     assert calls == [
-        "muse-spark-1.3-contributor-free", "muse-spark-1.3",
-        "muse-spark-1.2-contributor-free",
+        "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
+        "deepseek-v4-flash", "glm-5.3-flash",
     ]
 
 
@@ -181,33 +187,40 @@ def test_chain_exhaustion_falls_through_to_groq(monkeypatch):
     _env_off(monkeypatch)
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_API_KEY", "groq-key")
-    script = _Script(*([_http_error(429)] * 5 + [_chat_payload("via groq")]))
+    script = _Script(*([_http_error(429)] * 2 + [_chat_payload("via groq")]))
     monkeypatch.setattr("urllib.request.urlopen", script)
     result = client.complete("deliberator", "sys", "user")
     assert result.ok and result.provider == "groq"
-    assert len(script.requests) == 6
+    assert len(script.requests) == 3
 
 
-def test_go_gateway_ok_path_and_last_fallback(monkeypatch):
+def test_go_paid_contributors_ride_responses(monkeypatch):
     _env_off(monkeypatch)
     monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
-    script = _Script(_http_error(429), _chat_payload("via glm"))
+    script = _Script(_responses_payload("via paid"))
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client._complete_opencode_go("planner", "sys", "user")
+    assert result.ok and result.model == "muse-spark-1.3-contributor"
+    assert script.urls() == ["https://opencode.ai/zen/go/v1/responses"]
+    assert "input" in script.bodies()[0] and "messages" not in script.bodies()[0]
+
+
+def test_go_chain_ends_on_glm(monkeypatch):
+    _env_off(monkeypatch)
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
+    script = _Script(
+        _http_error(429), _http_error(429), _http_error(429),
+        _chat_payload("via glm"),
+    )
     monkeypatch.setattr("urllib.request.urlopen", script)
     result = client._complete_opencode_go("narrator", "sys", "user")
     assert result.ok and result.model == "glm-5.3-flash"
-    assert script.urls() == ["https://opencode.ai/zen/go/v1/chat/completions"] * 2
-    assert [b["model"] for b in script.bodies()] == ["deepseek-v4-flash", "glm-5.3-flash"]
-
-
-def test_go_responses_shape_rejected_chat_forced(monkeypatch):
-    # Go speaks chat/completions only: a responses-shaped body there is a
-    # shape error, and the chain still ends on glm.
-    _env_off(monkeypatch)
-    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
-    script = _Script({"output": [{"content": "hi"}]}, _chat_payload("via glm"))
-    monkeypatch.setattr("urllib.request.urlopen", script)
-    result = client._complete_opencode_go("narrator", "sys", "user")
-    assert result.ok and result.model == "glm-5.3-flash"
+    assert [b["model"] for b in script.bodies()] == [
+        "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
+        "deepseek-v4-flash", "glm-5.3-flash",
+    ]
+    assert script.urls()[:2] == ["https://opencode.ai/zen/go/v1/responses"] * 2
+    assert script.urls()[2:] == ["https://opencode.ai/zen/go/v1/chat/completions"] * 2
 
 
 def test_empty_responses_run_is_failure():
@@ -219,12 +232,16 @@ def test_chains_and_roles_configured():
     from core import config
 
     section = config.load_yaml("models.yaml")["opencode"]
-    assert section["models"][:2] == ["muse-spark-1.3-contributor-free", "muse-spark-1.3"]
-    assert section["models"][-1] == "deepseek-v4-flash"
+    assert section["models"] == [
+        "muse-spark-1.3-contributor-free", "muse-spark-1.2-contributor-free",
+    ]
     for role in ("planner", "narrator", "deliberator"):
         assert int(section[role]["max_tokens"]) > 0
     go = config.load_yaml("models.yaml")["opencode-go"]
-    assert go["models"] == ["deepseek-v4-flash", "glm-5.3-flash"]
+    assert go["models"] == [
+        "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
+        "deepseek-v4-flash", "glm-5.3-flash",
+    ]
     order = config.load_yaml("models.yaml")["provider_order"]
     assert order.index("opencode") < order.index("opencode-go") < order.index("groq")
 
