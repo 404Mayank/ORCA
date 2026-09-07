@@ -47,6 +47,29 @@ export function newSessionId(): string {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export interface Boundaries {
+  imbl: Array<[number, number]>;
+  source: string;
+  notes: string[];
+  bbox: number[];
+}
+
+let boundariesCache: Promise<Boundaries> | null = null;
+
+/** Static treaty geometry, fetched once. Same line the geofence tool tests. */
+export function getBoundaries(): Promise<Boundaries> {
+  if (!boundariesCache) {
+    boundariesCache = fetch("/geo/boundaries").then((response) => {
+      if (!response.ok) {
+        boundariesCache = null;
+        throw new Error(`boundaries ${response.status}`);
+      }
+      return response.json();
+    });
+  }
+  return boundariesCache;
+}
+
 export interface TierSettings {
   tier: string;
   tier_source: string;
@@ -94,6 +117,79 @@ export async function setTemplateFallback(template_fallback: boolean): Promise<T
 
 export async function setMaxRounds(max_rounds: number): Promise<TierSettings> {
   return postSettings({ max_rounds });
+}
+
+export class StreamFailed extends Error {
+  constructor(message = "stream failed") {
+    super(message);
+    this.name = "StreamFailed";
+  }
+}
+
+export interface StreamEvent {
+  seq: number;
+  stage: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Same turn over SSE: stage events while it runs, full ChatResponse in
+ * the terminal done frame. Throws StreamFailed on any transport trouble
+ * so the caller falls back to blocking ask() -- a partial answer is
+ * never surfaced.
+ */
+export async function askStream(
+  request: ChatRequest,
+  onEvent: (event: StreamEvent) => void,
+): Promise<ChatResponse> {
+  let response: Response;
+  try {
+    response = await fetch("/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
+      body: JSON.stringify(request),
+    });
+  } catch {
+    throw new StreamFailed("unreachable");
+  }
+  if (!response.ok || !response.body) throw new StreamFailed(`status ${response.status}`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const pump = async (): Promise<ChatResponse> => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: !done });
+      let idx: number;
+      while ((idx = buffer.indexOf("\n\n")) >= 0) {
+        const chunk = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const kindEnd = chunk.indexOf("\n");
+        const kind = kindEnd >= 0 ? chunk.slice(0, kindEnd).trim() : chunk.trim();
+        const dataIdx = chunk.indexOf("data: ");
+        if (dataIdx < 0) continue;
+        let payload: Record<string, unknown>;
+        try {
+          payload = JSON.parse(chunk.slice(dataIdx + 6));
+        } catch {
+          throw new StreamFailed("bad frame");
+        }
+        if (kind === "event: stage") {
+          onEvent(payload as StreamEvent);
+        } else if (kind === "event: done") {
+          await reader.cancel().catch(() => {});
+          return payload as unknown as ChatResponse;
+        }
+      }
+      if (done) throw new StreamFailed("cut off before done");
+    }
+  };
+  try {
+    return await pump();
+  } catch (error) {
+    if (error instanceof StreamFailed) throw error;
+    throw new StreamFailed(String(error));
+  }
 }
 
 export interface SessionTurn {

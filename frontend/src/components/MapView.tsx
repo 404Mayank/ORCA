@@ -21,12 +21,38 @@ const VERDICT_COLOUR: Record<string, string> = {
 
 interface Props {
   recommendation: Recommendation | null;
+  /** IMBL polyline from GET /geo/boundaries: the same treaty line the
+      geofence tool tests, drawn so the chart and the verdict agree. */
+  imbl: Array<[number, number]> | null;
 }
 
-export default function MapView({ recommendation }: Props) {
+export default function MapView({ recommendation, imbl }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const imblDrawn = useRef(false);
+  const imblRef = useRef(imbl);
+  imblRef.current = imbl;
+
+  const drawImbl = () => {
+    const m = map.current;
+    const line = imblRef.current;
+    if (!m || !line || line.length < 2 || imblDrawn.current) return;
+    if (!m.isStyleLoaded()) return;
+    m.addSource("imbl", {
+      type: "geojson",
+      data: {
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: line },
+      },
+    });
+    m.addLayer({
+      id: "imbl-line", type: "line", source: "imbl",
+      paint: { "line-color": "#e5484d", "line-width": 2, "line-dasharray": [7, 5] },
+    });
+    imblDrawn.current = true;
+  };
 
   useEffect(() => {
     if (!container.current || map.current) return;
@@ -70,6 +96,7 @@ export default function MapView({ recommendation }: Props) {
         id: "bbox-line", type: "line", source: "bbox",
         paint: { "line-color": "#4a9eff", "line-width": 1.5, "line-dasharray": [3, 3] },
       });
+      drawImbl();
     });
     // Unmount (panel closed, thread left) must destroy the map, or every
     // open/close leaks a WebGL context plus tile-fetch listeners.
@@ -78,8 +105,17 @@ export default function MapView({ recommendation }: Props) {
       markers.current = [];
       map.current?.remove();
       map.current = null;
+      imblDrawn.current = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The boundary arrives later than the map (one cached GET at boot), so
+  // drawing retries on every imbl change until it sticks.
+  useEffect(() => {
+    drawImbl();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imbl]);
 
   useEffect(() => {
     const m = map.current;

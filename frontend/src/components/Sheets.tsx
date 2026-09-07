@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import type { SessionTurn, TierSettings } from "../api/client";
 import { fill, str } from "../i18n/strings";
 import type { RecentQuery, SavedAnswer, Theme } from "../storage";
@@ -39,6 +40,8 @@ interface Props {
   theme: Theme;
   onSetTheme: (theme: Theme) => void;
   layers: Record<string, LayerStatus>;
+  /** Backend recovery hint (e.g. empty-cache fix). Shown verbatim. */
+  hint: string | null;
 }
 
 const fmtTime = (iso: string) => {
@@ -54,6 +57,16 @@ const fmtTime = (iso: string) => {
 export default function Sheets(props: Props) {
   const { sheet, onClose } = props;
   const sh = str.sheets;
+
+  // Escape closes. A full focus trap is still open (audit item); this is
+  // the cheap half that unblocks keyboard users today.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   return (
     <>
@@ -201,7 +214,7 @@ function AlertsPane({ alerts, onAskAlerts }: Props) {
 const MEMORY_PRESETS = [30, 90, 180];
 const ROUNDS_PRESETS = [0, 1, 2];
 
-function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, onSetContextTtl, onSetTemplateFallback, onSetMaxRounds, theme, onSetTheme, layers }: Props) {
+function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, onSetContextTtl, onSetTemplateFallback, onSetMaxRounds, theme, onSetTheme, layers, hint }: Props) {
   const c = str.sheets.settings;
   const tierCopy = c.tiers;
   return (
@@ -325,6 +338,7 @@ function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, on
 
       <div className="ev-sec">{c.dataHeading}</div>
       <div className="sheet-note">{c.dataSub}</div>
+      {hint && <div className="sheet-note mono-note">{hint}</div>}
       {Object.entries(layers).map(([name, layer]) => {
         // One joined sub-line: no stray separators, and no empty row when
         // a layer carries nothing but cached/missing (alerts have no age,

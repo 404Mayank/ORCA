@@ -208,6 +208,7 @@ const en = {
     legendOrigin: "Departure point",
     legendZone: "Fishing zone",
     legendBox: "Coromandel box",
+    legendBoundary: "Maritime boundary",
     readoutNoPosition: "No position in this answer",
     evidenceIntro:
       "Every figure above traces back to a tool call ORCA made. Freshness is measured against the moment of your query.",
@@ -306,6 +307,20 @@ const en = {
       ageHours: "{n} h old",
       ageDays: "{n} d old",
     },
+  },
+
+  pipeline: {
+    stages: {
+      plan: "Reading the question",
+      validate: "Checking the plan",
+      execute: "Reading the sea",
+      deliberate: "Agents thinking",
+      collaborate: "Agents comparing",
+      synthesise: "Assembling the answer",
+      verify: "Verifying every number",
+      narrate: "Writing it plainly",
+    } as Record<string, string>,
+    fallbackNote: "Live trace unavailable — asked directly.",
   },
 
   misc: {

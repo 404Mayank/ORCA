@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { str } from "../i18n/strings";
 import { SendIcon } from "./icons";
+import useGlow from "./useGlow";
 
 interface Props {
   placeholder?: string;
@@ -13,7 +14,9 @@ interface Props {
 export default function Composer({ placeholder, busy, compact, onSend }: Props) {
   const [value, setValue] = useState("");
   const ta = useRef<HTMLTextAreaElement>(null);
+  const fieldId = useId();
   const c = str.composer;
+  const glow = useGlow<HTMLFormElement>();
 
   useEffect(() => {
     const el = ta.current;
@@ -26,6 +29,7 @@ export default function Composer({ placeholder, busy, compact, onSend }: Props) 
 
   return (
     <form
+      ref={glow.ref}
       className="composer"
       onSubmit={(e) => {
         e.preventDefault();
@@ -34,16 +38,23 @@ export default function Composer({ placeholder, busy, compact, onSend }: Props) 
         setValue("");
       }}
     >
-      <label style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>
-        {sendable ? c.send : c.placeholder}
+      <label
+        htmlFor={fieldId}
+        style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}
+      >
+        {placeholder ?? c.placeholder}
       </label>
       <textarea
         ref={ta}
+        id={fieldId}
         rows={1}
         value={value}
         disabled={busy}
         placeholder={placeholder ?? c.placeholder}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          glow.ping();
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();

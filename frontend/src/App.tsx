@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ask,
+  askStream,
   forgetSession,
+  getBoundaries,
   getSettings,
+  StreamFailed,
   newSessionId,
   setContextTtl,
   setDeliberating,
@@ -13,12 +16,14 @@ import {
   setTier,
   type Readiness,
   type SessionTurn,
+  type StreamEvent,
   type TierSettings,
 } from "./api/client";
 import type { ChatResponse, Recommendation } from "./types";
 import AnswerView from "./components/AnswerView";
 import Bridge from "./components/Bridge";
 import ErrorBoundary from "./components/ErrorBoundary";
+import PipelineTrace from "./components/PipelineTrace";
 import Composer from "./components/Composer";
 import EvidencePane from "./components/EvidencePane";
 import Rail, { type RailKey } from "./components/Rail";
@@ -78,8 +83,10 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Readiness | null>(null);
   const [settings, setSettings] = useState<TierSettings | null>(null);
+  const [imbl, setImbl] = useState<Array<[number, number]> | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [panel, setPanel] = useState<"map" | "evidence" | null>(null);
+  const [trace, setTrace] = useState<StreamEvent[]>([]);
   const [drawer, setDrawer] = useState<Recommendation | null>(null);
   const [mapFor, setMapFor] = useState<Recommendation | null>(null);
   const [turns, setTurns] = useState<SessionTurn[]>([]);
@@ -105,20 +112,42 @@ export default function App() {
   // cache is the likeliest demo failure, and this is where it surfaces --
   // before the first question, not inside its answer.
   useEffect(() => {
+    // Promise-driven, not timer-driven: the bar may show at most 90% until
+    // both checks settle, and dismisses only after they have. A slow
+    // /readiness can no longer be papered over by the ceremony.
+    const started = Date.now();
     const steps = str.boot.steps;
     let i = 0;
     const tick = setInterval(() => {
       i += 1;
-      setBoot({ pct: Math.min(100, i * 26), label: steps[Math.min(i, steps.length - 1)] });
-      if (i >= 4) clearInterval(tick);
+      setBoot({ pct: Math.min(90, i * 24), label: steps[Math.min(i, steps.length - 1)] });
     }, 260);
+    const dismiss = () => {
+      clearInterval(tick);
+      const wait = Math.max(0, 900 - (Date.now() - started));
+      setTimeout(() => {
+        setBoot((b) => (b ? { pct: 100, label: b.label } : b));
+        setTimeout(() => setBoot(null), 350);
+      }, wait);
+    };
+    let pending = 2;
+    const settle = () => {
+      pending -= 1;
+      if (pending <= 0) dismiss();
+    };
     readiness()
       .then(setStatus)
-      .catch(() => setStatus(null));
+      .catch(() => setStatus(null))
+      .finally(settle);
+    // Static treaty line for the chart. Fails silently: the map stays
+    // honest without it (legend names only what is drawn).
+    getBoundaries()
+      .then((b) => setImbl(b.imbl))
+      .catch(() => setImbl(null));
     getSettings()
       .then(setSettings)
       .catch(() => setSettings(null))
-      .finally(() => setTimeout(() => setBoot(null), 1250));
+      .finally(settle);
     return () => clearInterval(tick);
   }, []);
 
@@ -151,12 +180,23 @@ export default function App() {
     setMessages((m) => [...m, { role: "user", text }]);
     setBusy(true);
     const mine = ++reqId.current;
+    setTrace([]);
+    const onEvent = (event: StreamEvent) => setTrace((t) => [...t, event]);
+    const payload = {
+      query: text,
+      session_id: sessionId.current,
+      include_recommendation: true,
+    };
     try {
-      const response = await ask({
-        query: text,
-        session_id: sessionId.current,
-        include_recommendation: true,
-      });
+      // Live trace first; any transport trouble falls back to the
+      // identical blocking route. A partial answer is never shown.
+      let response: ChatResponse;
+      try {
+        response = await askStream(payload, onEvent);
+      } catch (error) {
+        if (!(error instanceof StreamFailed)) throw error;
+        response = await ask(payload);
+      }
       if (reqId.current !== mine) return; // superseded by New query
       setMessages((m) => [...m, { role: "bot", text: response.answer, response }]);
       setRecents(pushRecent({ query: text, verdict: response.verdict ?? null, at: Date.now() }));
@@ -496,9 +536,13 @@ export default function App() {
                       </span>
                       {str.meta.appName}
                     </div>
-                    <div className="answer">
-                      <p>{str.misc.thinking}</p>
-                    </div>
+                    {trace.length > 0 ? (
+                      <PipelineTrace events={trace} />
+                    ) : (
+                      <div className="answer">
+                        <p>{str.misc.thinking}</p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -548,7 +592,7 @@ export default function App() {
                     re-initialising on every switch would refetch tiles and
                     lose the camera. */}
                 <div style={{ display: panel === "map" ? "contents" : "none" }}>
-                  <SectorMap recommendation={mapFor} />
+                  <SectorMap recommendation={mapFor} imbl={imbl} />
                 </div>
                 {panel === "evidence" && drawer && <EvidencePane recommendation={drawer} />}
               </aside>
@@ -592,6 +636,7 @@ export default function App() {
             onSetContextTtl={(m) => void changeSetting(() => setContextTtl(m))}
             onSetTemplateFallback={(v) => void changeSetting(() => setTemplateFallback(v))}
             onSetMaxRounds={(r) => void changeSetting(() => setMaxRounds(r))}
+            hint={status?.hint ?? null}
             theme={theme}
             onSetTheme={(t) => setTheme(t)}
             layers={status?.layers ?? {}}

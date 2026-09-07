@@ -30,6 +30,7 @@ from agents.synthesis_agent import build_recommendation
 from core.schemas.intent import Intent
 from core.schemas.recommendation import Recommendation
 from orchestrator.collaborate import run_with_collaboration
+from orchestrator.progress import ProgressBus
 from orchestrator.session import SESSIONS, Turn
 from orchestrator.verifier import verify
 
@@ -168,6 +169,7 @@ def run_turn(
     query: str,
     session_id: str | None = None,
     language: str = "en",
+    progress: ProgressBus | None = None,
 ) -> TurnResult:
     """Answer one question. Never raises.
 
@@ -199,6 +201,19 @@ def run_turn(
         )
     intent = planning.output.intent
     notes = list(planning.notes)
+
+    def emit(stage: str, **detail: object) -> None:
+        # Validation observably happened iff a plan exists (Gate 2 runs
+        # inside plan_query), so it rides on the plan event rather than as
+        # its own -- a separate validate event from here would be invented.
+        if progress is not None:
+            progress.emit(stage, **detail)
+
+    emit(
+        "plan",
+        query_type=getattr(getattr(intent, "query_type", None), "value", "unknown"),
+        fallback=bool(planning.used_fallback),
+    )
 
     def finish(result: TurnResult) -> TurnResult:
         result.duration_ms = int(
@@ -279,7 +294,8 @@ def run_turn(
     try:
         # Not a bare execution: agents review what came back and may extend the
         # plan, then it runs again. See orchestrator/collaborate.py.
-        teamwork = run_with_collaboration(planning.plan, intent, turn_id=turn_id)
+        emit("execute", round=1)
+        teamwork = run_with_collaboration(planning.plan, intent, turn_id=turn_id, progress=progress)
         execution = teamwork.result
         notes.extend(teamwork.notes)
         notes.extend(f"dropped: {d}" for d in teamwork.dropped)
@@ -295,6 +311,7 @@ def run_turn(
 
     # -- synthesise --------------------------------------------------------
     try:
+        emit("synthesise")
         recommendation = build_recommendation(execution, intent, turn_id=turn_id)
     except Exception as exc:  # noqa: BLE001
         notes.append(f"synthesis raised {type(exc).__name__}: {exc}")
@@ -334,6 +351,7 @@ def run_turn(
 
     # -- verify, BEFORE any prose is produced ------------------------------
     report = verify(recommendation, execution.tool_call_log)
+    emit("verify", ok=bool(report.ok), numbers_checked=int(report.numbers_checked))
     if not report.ok:
         # Deliberately not narrated. Rendering an object that failed
         # verification would produce a fluent, confident, unsupported answer --
@@ -356,7 +374,10 @@ def run_turn(
         )
 
     # -- narrate -----------------------------------------------------------
+    # Only the source is emitted, never the text: streaming partial prose
+    # would display numbers before the guard passes on the complete text.
     narration = narrate(recommendation, language=language)
+    emit("narrate", source=narration.source)
     return finish(
         TurnResult(
             state="answer",

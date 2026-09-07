@@ -13,11 +13,15 @@ after the fact.
 
 from __future__ import annotations
 
+import json
+import threading
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.progress import ProgressBus
 from orchestrator.session import SESSIONS
 from orchestrator.turn import run_turn
 
@@ -89,18 +93,9 @@ class ChatResponse(BaseModel):
     recommendation: dict[str, Any] | None = None
 
 
-@router.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
-    """Answer one question.
-
-    Never returns 5xx for a domain failure. A refusal, a clarification and an
-    internal failure are all 200 with a ``state`` the client renders --
-    because "the venue wifi died" and "I need to know which boat" are both
-    things a fisherman should see as sentences, not as an error page.
-    """
-    result = run_turn(
-        request.query, session_id=request.session_id, language=request.language
-    )
+def _to_response(result: Any, include_recommendation: bool) -> ChatResponse:
+    """One translation from TurnResult to ChatResponse, shared by the
+    blocking and streaming routes so they cannot drift apart."""
     return ChatResponse(
         turn_id=result.turn_id,
         state=result.state,
@@ -121,10 +116,74 @@ def chat(request: ChatRequest) -> ChatResponse:
         notes=result.notes,
         recommendation=(
             result.recommendation.model_dump(mode="json")
-            if (request.include_recommendation and result.recommendation is not None)
+            if (include_recommendation and result.recommendation is not None)
             else None
         ),
     )
+
+
+@router.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest) -> ChatResponse:
+    """Answer one question.
+
+    Never returns 5xx for a domain failure. A refusal, a clarification and an
+    internal failure are all 200 with a ``state`` the client renders --
+    because "the venue wifi died" and "I need to know which boat" are both
+    things a fisherman should see as sentences, not as an error page.
+    """
+    result = run_turn(
+        request.query, session_id=request.session_id, language=request.language
+    )
+    return _to_response(result, request.include_recommendation)
+
+
+@router.post("/chat/stream")
+def chat_stream(request: ChatRequest):
+    """Same turn, streamed. Stage events while it runs, full answer at the end.
+
+    Runs the identical ``run_turn()`` in a worker thread; the blocking
+    ``POST /chat`` stays untouched as the fallback and the CLI path. Every
+    ``event:`` frame comes from a real pipeline boundary (see
+    ``orchestrator/progress.py``); the terminal ``done:`` frame carries the
+    complete ``ChatResponse``. A client that loses the stream mid-flight
+    retries with blocking ``POST /chat`` -- no partial answer is ever shown.
+    """
+    bus = ProgressBus()
+    box: dict[str, object] = {}
+
+    def work() -> None:
+        try:
+            box["result"] = run_turn(
+                request.query,
+                session_id=request.session_id,
+                language=request.language,
+                progress=bus,
+            )
+        except Exception as exc:  # noqa: BLE001 -- run_turn never raises, belt and braces
+            box["error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            bus.close()
+
+    thread = threading.Thread(target=work, name="orca-stream", daemon=True)
+    thread.start()
+
+    def frames():
+        while thread.is_alive():
+            for event in bus.drain(timeout=1.0):
+                if event is not None:
+                    yield f"event: stage\ndata: {json.dumps(event)}\n\n"
+        for event in bus.drain(timeout=1.0):
+            if event is not None:
+                yield f"event: stage\ndata: {json.dumps(event)}\n\n"
+        thread.join(timeout=10.0)
+        result = box.get("result")
+        if result is None:
+            payload = {"state": "error", "answer": str(box.get("error", "stream failed"))}
+        else:
+            payload = _to_response(result, request.include_recommendation).model_dump(mode="json")
+        yield f"event: done\ndata: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(frames(), media_type="text/event-stream")
 
 
 @router.get("/session/{session_id}")

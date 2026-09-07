@@ -67,6 +67,40 @@ can't wait for JS). Desktop + 390px shots read clean, zero console errors.
   the map, clarification/refusal/window rendering, promise-driven boot,
   `missing_slots`/fallback-plan surfacing, sheet focus trap + Escape.
 
+## What landed on 2026-09-07 (later) — live pipeline trace (SSE)
+
+`POST /chat/stream` runs the identical `run_turn()` in a worker thread
+and yields stage frames from a per-turn `ProgressBus`
+(`orchestrator/progress.py`): plan → execute → deliberate → collaborate →
+synthesise → verify → narrate, then the full `ChatResponse` as `done`.
+The UI renders a live trace with per-agent rows and falls back to
+blocking `POST /chat` on any transport trouble. Settled design point:
+stage events stream, prose never streams pre-guard -- narration appears
+via a post-guard reveal, so the verify-before-narrate order is
+untouched. `tests/test_stream.py` pins it: allowlist-only stages in
+order, no fabricated fields, stream==blocking answer, concurrent turns
+both terminate, verify-fail emits no narrate. Suite: 405 passed /
+15 skipped. Verified live in-browser: trace rows appear mid-turn.
+Also shipped: pointer/typing-reactive composer halo + backdrop parallax
+(rAF-throttled custom props, composite-only, reduced-motion and mobile
+kill-switches), shared `_to_response` builder so both routes agree.
+
+## What landed on 2026-09-07 (later) — treaty line on the chart
+
+The audit's top map complaint is fixed without touching the verdict
+path: `GET /geo/boundaries` serves the IMBL polyline from the same
+digitised treaty source the geofence tool tests (`imbl_linestring()`),
+so the drawn line and the checked line cannot drift apart. MapView draws
+it red-dashed with a legend row that only appears when the fetch
+succeeds; a failed fetch leaves an honest boundary-less map. 3 tests
+(positions match source, line crosses the box, provenance travels).
+Suite: 401 passed / 15 skipped. Verified with a live geofence answer:
+Rameswaram origin + treaty line on the sector chart.
+
+Route legs stay un-drawn on purpose: `optimise_route` waypoints never
+reach the recommendation (no waypoint claims in synthesis), and piping
+them through is a synthesis change for another pass.
+
 ## What landed on 2026-09-07 (later) — worker knob batch + UI surfacing
 
 A worker (`general.worker`, tight file allowlist, backend only) added 7

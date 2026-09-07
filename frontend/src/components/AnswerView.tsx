@@ -66,7 +66,11 @@ export default function AnswerView({ response, onOpenEvidence, onSend, busy }: P
       )}
 
       {paragraphs.map((p, i) => (
-        <p key={i}>{p}</p>
+        // Reveal, not streaming: this text already passed the number guard
+        // in full. Staggered fade only; instant under reduced motion.
+        <p key={i} className="reveal" style={{ animationDelay: `${Math.min(i * 70, 560)}ms` }}>
+          {p}
+        </p>
       ))}
 
       {(rec?.drivers?.length ?? 0) > 0 && (
