@@ -3,7 +3,16 @@
 # scripts/replay.py. Never committed: it is large, local, and stale by design.
 data/
 # Secrets. Copy .env.example to .env and fill in.
+#
+# `.env` alone was not enough: the file someone creates the moment they get a
+# paid key is `.env.local` or `.env.production`, and neither was covered. A key
+# that reaches git is leaked even in a private repo -- collaborators see it,
+# forks keep it, and history is permanent -- so the remedy is to rotate the key,
+# not to delete the line.
 .env
+.env.*
+# ...except the template, which carries variable names and no values.
+!.env.example
 # --- Python --------------------------------------------------------------
 __pycache__/
 *.py[cod]
