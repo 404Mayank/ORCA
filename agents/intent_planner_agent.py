@@ -391,12 +391,18 @@ def _chat(query: str, text: str, suggestions: list[str] | None = None) -> Planne
     # figure in it could never be verified -- and an unverifiable figure in
     # confident prose is precisely what the verifier exists to stop.
     safe = strip_numbers(text).strip()
+    # Order-preserving dedupe, cap four: the model repeats itself (seen:
+    # the same suggestion twice in one reply), and a duplicated button is
+    # sloppy. Previous-turn suggestions are NOT filtered here -- session
+    # Turns record no options, so the history to de-repeat against is
+    # unreachable; within-turn dedupe is the honest limit.
+    seen = list(dict.fromkeys([s for s in (suggestions or SUGGESTIONS) if s.strip()]))[:4]
     return PlannerOutput(
         intent=Intent(query_type=QueryType.SAFETY_ASSESS, raw_query=query),
         state="chat",
         chat=ChatReply(
             text=safe or CAPABILITIES,
-            suggestions=list(suggestions or SUGGESTIONS)[:4],
+            suggestions=seen,
         ),
     )
 
@@ -961,8 +967,17 @@ def _plan_without_llm(
 
 
 def _use_fallback(
-    intent: Intent, notes: list[str], attempts: int, provider: str, model: str
+    intent: Intent, notes: list[str], attempts: int, provider: str, model: str,
+    deterministic: bool = False,
 ) -> PlanningResult:
+    """Hardcoded plan when the model path is unavailable or unneeded.
+
+    ``deterministic`` marks the clarification-answer fast path: every slot is
+    known, so no model was needed and nothing failed. It must NOT wear the
+    fallback badge -- ``used_fallback`` stays False and the note says why.
+    Every other caller is a genuine fallback (providers exhausted, plans
+    invalid) and keeps the flag.
+    """
     subs = _fallback_substitutions(intent)
     if subs is None:
         gaps = intent.blocking_gaps() or ["spatial_reference"]
@@ -973,11 +988,13 @@ def _use_fallback(
     result: PlanValidationResult = validate_plan(raw)
     if result.ok:
         output = PlannerOutput(intent=intent, state="plan", plan=raw)
+        if deterministic:
+            notes = notes + ["deterministic plan from an answered clarification; no model call was needed"]
         return PlanningResult(
             output=output,
             plan=result.plan,
             attempts=attempts,
-            used_fallback=True,
+            used_fallback=not deterministic,
             llm_provider=provider,
             llm_model=model,
             notes=notes,

@@ -20,6 +20,7 @@ The two gates are non-negotiable and both live here rather than in the route:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -35,6 +36,8 @@ from orchestrator.session import SESSIONS, Turn
 from orchestrator.verifier import verify
 
 __all__ = ["TurnResult", "run_turn"]
+
+logger = logging.getLogger(__name__)
 
 _COUNTER = {"n": 0}
 
@@ -175,7 +178,8 @@ def _plan_from_intent(intent: Intent) -> "PlanningResult":
             notes=[f"answered from a clarification; still missing {gaps}"],
         )
     return _use_fallback(
-        intent, ["answered from a clarification; slots complete"], 0, "session", ""
+        intent, ["answered from a clarification; slots complete"], 0, "session", "",
+        deterministic=True,
     )
 
 
@@ -232,6 +236,19 @@ def run_turn(
     def finish(result: TurnResult) -> TurnResult:
         result.duration_ms = int(
             (datetime.now(timezone.utc) - started).total_seconds() * 1000
+        )
+        # One line per turn: how it was planned and narrated, for measuring
+        # fallback frequency from logs. Counts only, no user text -- notes
+        # travel on the result itself, not here.
+        logger.info(
+            "turn=%s state=%s provider=%s attempts=%d fallback=%s narration=%s notes=%d",
+            result.turn_id,
+            result.state,
+            result.llm_provider,
+            planning.attempts,
+            result.used_fallback_plan,
+            result.narration_source or "-",
+            len(result.notes),
         )
         SESSIONS.record(
             session_id,
