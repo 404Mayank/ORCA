@@ -86,3 +86,24 @@ def test_the_route_reports_which_zones_it_avoided(grid):
     if out.status.value == "failed":
         pytest.skip(f"no route across Palk Bay for this vessel: {out.error}")
     assert "imbl" in out.avoids
+
+
+def test_a_zero_length_leg_fails_rather_than_returning_a_single_point(grid):
+    """The boat is already at its shelter: no leg to draw, not a 1-point route.
+
+    Every shore-anchored query resolves nearest_landing_centre to its own
+    origin, so round-2 collaboration hands optimise_route start == end.
+    Returning that OK with one waypoint crashed synthesis (Route needs >= 2
+    waypoints) and errored the whole turn; failing honestly lets the turn
+    answer no_go naming the shelter with route None.
+    """
+    out = optimise_route(
+        OptimiseRouteIn(
+            start=GeoPoint(lat=11.75, lon=79.77),
+            end=GeoPoint(lat=11.75, lon=79.77),
+            grid_ref=grid.grid_ref,
+            vessel_class="frp_9m",
+        )
+    )
+    assert out.status.value == "failed"
+    assert "already at its shelter" in out.error

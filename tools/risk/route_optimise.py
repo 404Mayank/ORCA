@@ -134,6 +134,18 @@ def optimise_route(args: OptimiseRouteIn) -> OptimiseRouteOut:
             "Start or destination has no navigable water within range for this "
             "vessel class."
         )
+    if start == goal:
+        # Zero-length leg: the boat is already at its shelter. Every
+        # shore-anchored query resolves nearest_landing_centre to its own
+        # origin, so this is the common case on a no_go day, not an edge.
+        # A cell routed to itself is one point, which is not a polyline --
+        # returning it OK crashed synthesis (Route needs >= 2 waypoints),
+        # so this fails honestly and synthesis names the shelter with no
+        # line to draw.
+        return fail(
+            "Start and destination snap to the same navigable cell: the boat "
+            "is already at its shelter, so there is no leg to draw."
+        )
 
     cells = grid["cells"]
 
