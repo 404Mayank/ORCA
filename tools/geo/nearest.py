@@ -103,6 +103,9 @@ def _gazetteer() -> dict[str, dict]:
             "lat": float(spec["lat"]),
             "lon": float(spec["lon"]),
             "note": spec.get("note"),
+            # Per-point provenance; older entries predate the fields.
+            "source": spec.get("source", "bbox.yaml#reference_points"),
+            "confidence": float(spec.get("confidence", 0.8)),
         }
         for name, spec in points.items()
     }
@@ -125,7 +128,10 @@ def resolve_place(args: ResolvePlaceIn) -> ResolvePlaceOut:
     table = _gazetteer()
 
     hit = table.get(key)
-    confidence = 0.8  # provisional gazetteer, never a clean 1.0
+    # The point's own confidence, capped below 1.0 while the gazetteer is
+    # provisional. A verified multi-source point reports higher than a seed,
+    # but nothing claims certainty until the INCOIS set lands.
+    confidence = min(float(hit["confidence"]), 0.95) if hit else 0.8
     if hit is None:
         # Substring fallback, so "Nagapattinam port" still resolves.
         candidates = [v for k, v in table.items() if key in k or k in key]
@@ -149,7 +155,11 @@ def resolve_place(args: ResolvePlaceIn) -> ResolvePlaceOut:
         )
 
     return ResolvePlaceOut(
-        provenance=_PROVISIONAL_GAZETTEER,
+        provenance=Provenance(
+            source=hit["source"],
+            native_units="degrees",
+            authority="ORCA (provisional)",
+        ),
         matched_name=hit["name"],
         lat=hit["lat"],
         lon=hit["lon"],
@@ -186,7 +196,11 @@ def nearest_landing_centre(args: NearestLandingCentreIn) -> NearestLandingCentre
 
     entry, metres, azimuth = best
     return NearestLandingCentreOut(
-        provenance=_PROVISIONAL_GAZETTEER,
+        provenance=Provenance(
+            source=entry["source"],
+            native_units="degrees",
+            authority="ORCA (provisional)",
+        ),
         name=entry["name"],
         lat=entry["lat"],
         lon=entry["lon"],

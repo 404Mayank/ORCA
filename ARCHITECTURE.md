@@ -298,7 +298,7 @@ python scripts/refresh_cache.py --weather --ocean --alerts --static
 | cyclone advisories | GDACS `gdacs.org/gdacsapi/.../geteventlist` | ✔ | normalised to `{type, severity, zone, issued_at, valid_until, authority, text}` |
 | bathymetry | SRTM30_PLUS | ✔ | `z` is elevation, so depth is `-z` |
 | IMBL / maritime boundary | UN treaty texts, LKA–IND 1974 and 1976 | ✔ | digitised from the treaty turning points, not a shapefile |
-| landing centres | gazetteer in `config/bbox.yaml` | | provisional 7 points; surfaced as a caveat in every answer that uses one |
+| landing centres | gazetteer in `config/bbox.yaml` | | 20 points (7 seed + 13 verified 2026-09-07, per-point source/confidence); INCOIS set still wanted, caveat kept |
 
 The Copernicus Marine dependency named in the original plan was replaced by NOAA
 CoastWatch, which is keyless and has never rate-limited us.
@@ -490,7 +490,7 @@ ones it shows.
   deleted.
 - **MPA and EEZ geometry** is incomplete. "Clear of boundaries" is currently
   qualified to the IMBL alone, and the answer says so.
-- **The landing-centre gazetteer is provisional** — 7 points, not the INCOIS set.
+- **The landing-centre gazetteer is provisional** — 20 points (7 seed + 13 verified against OSM Nominatim, each with source and confidence below 1.0), not the INCOIS set.
   Every answer that resolves a place carries a caveat saying to confirm the
   coordinate against the official database before navigating.
 - **Ingest is run by hand.** `scripts/refresh_cache.py` is not yet scheduled.

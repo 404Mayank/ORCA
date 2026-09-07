@@ -69,12 +69,28 @@ reference_points:
   # are provisional until ingest/static/landing_centres.py loads the INCOIS
   # set; treat these as approximate and do not cite them to a judge.
   chennai:        { lat: 13.08, lon: 80.27, note: "north of box, refusal test" }
-  cuddalore:      { lat: 11.75, lon: 79.77 }
-  nagapattinam:   { lat: 10.77, lon: 79.84, note: "primary demo origin" }
-  point_calimere: { lat: 10.29, lon: 79.85, note: "Palk Bay / Bay of Bengal divide" }
-  rameswaram:     { lat:  9.29, lon: 79.31 }
-  tuticorin:      { lat:  8.76, lon: 78.13, note: "west of box, refusal test" }
-  kochi:          { lat:  9.93, lon: 76.27, note: "outside box, refusal test" }
+  cuddalore:      { lat: 11.75, lon: 79.77, source: "bbox-seed", confidence: 0.8 }
+  nagapattinam:   { lat: 10.77, lon: 79.84, note: "primary demo origin", source: "bbox-seed", confidence: 0.8 }
+  point_calimere: { lat: 10.29, lon: 79.85, note: "Palk Bay / Bay of Bengal divide", source: "bbox-seed", confidence: 0.8 }
+  rameswaram:     { lat:  9.29, lon: 79.31, source: "bbox-seed", confidence: 0.8 }
+  tuticorin:      { lat:  8.76, lon: 78.13, note: "west of box, refusal test", source: "bbox-seed", confidence: 0.8 }
+  kochi:          { lat:  9.93, lon: 76.27, note: "outside box, refusal test", source: "bbox-seed", confidence: 0.8 }
+  # --- verified landing centres, 2026-09-07. Each coordinate cross-checked
+  # against OSM Nominatim independently of the reporting source. Confidence 0.9
+  # for dual-source agreement, 0.85 for single-coordinate-source points.
+  pamban:             { lat:  9.283,  lon: 79.200,  note: "fishing harbour, Rameswaram Island", source: "wikipedia+osm", confidence: 0.9 }
+  mandapam:           { lat:  9.28,   lon: 79.12,   note: "jetty, Palk Bay / Gulf of Mannar junction", source: "wikipedia+osm", confidence: 0.9 }
+  thondi:             { lat:  9.7764, lon: 79.0078, note: "fishing harbour, Palk Bay", source: "wikipedia+osm", confidence: 0.9 }
+  devipattinam:       { lat:  9.477,  lon: 78.8961, note: "traditional landing site; historic port", source: "wikipedia+osm", confidence: 0.85 }
+  karaikal:           { lat: 10.9157, lon: 79.8376, note: "town coords; fishing harbour at Arasalar mouth ~1-2 km S", source: "osm+wikipedia", confidence: 0.9 }
+  tharangambadi:      { lat: 11.0292, lon: 79.8494, note: "historic port, active local fishery", source: "wikipedia+osm", confidence: 0.9 }
+  pazhayar:           { lat: 11.236,  lon: 79.7355, note: "river-mouth harbour; OSM namesake is a different village", source: "onefivenine+pmmsy-news", confidence: 0.85 }
+  parangipettai:      { lat: 11.4906, lon: 79.7569, note: "fishing port, Vellar estuary", source: "osm+wikipedia", confidence: 0.9 }
+  mudasalodai:        { lat: 11.4814, lon: 79.7722, note: "landing centre; single coordinate source", source: "wikimapia+cuddalore-fisheries", confidence: 0.85 }
+  adirampattinam:     { lat: 10.3393, lon: 79.3856, note: "landing site, not a formal harbour", source: "osm+wikipedia", confidence: 0.9 }
+  muthupet:           { lat: 10.3957, lon: 79.4945, note: "lagoon traditional fishery", source: "osm+wikipedia", confidence: 0.9 }
+  kottaipattinam:     { lat:  9.9791, lon: 79.1986, note: "fish landing centre", source: "wikipedia+osm", confidence: 0.9 }
+  sethubhavachatram:  { lat: 10.2476, lon: 79.2786, note: "fishing port; single coordinate source", source: "osm+thanjavur-notice", confidence: 0.85 }
 
 sub_basins:
   # Coarse rectangles, used only for labelling and the sheltered-alternative

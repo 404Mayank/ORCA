@@ -1,0 +1,116 @@
+# Dataset registry: every source ORCA reads, and the ones it still wants.
+#
+# This is a RECORD, not a fetcher. Nothing here is discovered at query time --
+# there is no discovery agent by design; ingest/ fills the caches on a
+# schedule and tools read them. `ingest/catalogue.py::resolve_datasets()`
+# serves these records so the planner prompt and the evidence drawer cite the
+# same source strings the provenance blocks carry.
+#
+# status: live (cached on schedule) | static (fetched once) | in_repo
+#         | operator (human-maintained) | wanted (no source yet) | rejected
+
+- id: open_meteo_marine
+  layer: waves, swell, SST, currents, sea level
+  authority: Open-Meteo
+  access: keyless https://marine-api.open-meteo.com/v1/marine
+  status: live
+  cache: data/raw/open_meteo/marine_*.json
+  native_resolution_deg: 0.0833
+  note: 1/12 deg measured 2026-09-04; regridding to 0.05 is upsampling.
+
+- id: open_meteo_forecast
+  layer: wind, gusts, visibility, precipitation
+  authority: Open-Meteo
+  access: keyless https://api.open-meteo.com/v1/forecast
+  status: live
+  cache: data/raw/open_meteo/forecast_*.json
+
+- id: jplMURSST41
+  layer: sea-surface temperature (L4, gap-free)
+  authority: NASA JPL / NOAA CoastWatch
+  access: keyless ERDDAP https://coastwatch.pfeg.noaa.gov/erddap
+  status: live
+  cache: data/raw/erddap/jplMURSST41_*.json
+  native_resolution_deg: 0.01
+
+- id: nesdisVHNnoaaSNPPnoaa20NRTchlaGapfilledDaily
+  layer: chlorophyll-a (DINEOF gap-filled)
+  authority: NOAA CoastWatch
+  access: keyless ERDDAP
+  status: live
+  cache: data/raw/erddap/nesdisVHNnoaaSNPPnoaa20NRTchlaGapfilledDaily_*.json
+  native_resolution_deg: 0.0833
+
+- id: nesdisVHNSQchlaMonthly
+  layer: chlorophyll monthly climatology baseline
+  authority: NOAA CoastWatch / VIIRS
+  access: keyless ERDDAP
+  status: live
+  cache: data/climatology/chl_month_*.json
+  note: Reduced to per-pixel per-month mean/std; monthly fields discarded.
+
+- id: gdacs_tc
+  layer: tropical cyclone advisories
+  authority: GDACS (EU JRC + UN OCHA); IMD outranks when transcribed
+  access: keyless https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH
+  status: live
+  cache: data/raw/gdacs/cyclones_*.json
+  note: Cyclones only. 12 h max cache age, tighter than satellite layers.
+
+- id: incois_high_wave
+  layer: high-wave and swell-surge advisories
+  authority: INCOIS
+  access: operator table config/active_alerts.yaml (no machine feed exists)
+  status: operator
+  note: Stale past review_max_age_hours counts as unchecked, never as empty.
+
+- id: srtm30plus
+  layer: bathymetry
+  authority: NOAA CoastWatch ERDDAP
+  access: keyless
+  status: static
+  cache: data/static/bathymetry.json
+  native_resolution_deg: 0.0083
+  note: z is elevation; depth is -z. GEBCO 2024 not obtained; same quantity.
+
+- id: imbl_treaties
+  layer: India-Sri Lanka maritime boundary (27 turning points)
+  authority: UN DOALOS treaty texts 1974 + 1976
+  access: in_repo ingest/static/boundaries.py
+  status: in_repo
+  note: Advisory digitisation, not for navigation. Great-circle arcs as straight segments.
+
+- id: bbox_seed_gazetteer
+  layer: landing-centre seed (7 points)
+  authority: ORCA (provisional)
+  access: in_repo config/bbox.yaml#reference_points
+  status: in_repo
+  note: Per-point source/confidence; never 1.0. Replaced by incois_landing_centres when ingested.
+
+- id: incois_landing_centres
+  layer: official fish landing centre points
+  authority: INCOIS
+  access: none known
+  status: wanted
+  note: Loader ready at ingest/static/landing_centres.py; seed stands in.
+
+- id: gom_mpa
+  layer: Gulf of Mannar Marine National Park boundary
+  authority: Protected Planet / WDPA (to confirm)
+  access: UNEP-WCMC ArcGIS REST mirror (keyless) -- checked 2026-09-07, no GoM MNP polygon present (only Adam's Bridge NP (LK), Ramsar sites); re-check via ingest/static/mpa_eez.py
+  status: wanted
+  note: geofence_check reports mpa as unavailable until geometry lands.
+
+- id: eez_india_east
+  layer: EEZ polygon
+  authority: Marine Regions v12 (to confirm)
+  access: keyless https://www.marineregions.org/download_file.php?name=World_EEZ_v12_20231025.zip
+  status: wanted
+  note: In-box the EEZ line is the IMBL itself (treaties); polygon wanted for completeness.
+
+- id: lightning_feed
+  layer: lightning strikes
+  authority: none identified
+  access: none known
+  status: wanted
+  note: Never reported as checked. No public source found.

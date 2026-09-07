@@ -44,7 +44,7 @@ register(
     output_model=GeofenceCheckOut,
     agent=AgentGroup.GEOSPATIAL,
     safety_critical=True,
-    notes="IMBL geometry to be digitised from Limits in the Seas No. 77; not yet obtained.",
+    notes="IMBL digitised from the 1974/1976 treaty texts (ingest/static/boundaries.py). MPA/EEZ/restricted pending keyless geometry; see config/datasets.yaml.",
 )
 
 
