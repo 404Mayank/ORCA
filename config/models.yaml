@@ -133,6 +133,25 @@ opencode-go:
     temperature: 0.1
     max_tokens: 700
 
+# Model tiers, selected by ORCA_TIER (free | fast | paid, default free).
+# A tier overrides provider order and per-provider chains; roles, guards and
+# fallbacks are unchanged. `free` is exactly the base config above.
+tiers:
+  fast:
+    # Grok answers in ~3 s off-peak; paid ids need Go quota, not Zen credits.
+    order: [opencode-go, opencode, groq, anthropic, ollama]
+    opencode-go:
+      - grok-4.6
+      - deepseek-v4-flash
+  paid:
+    # Strongest reasoning available with quota, verified live 2026-09-07
+    # (kimi-k3 2.3 s, deepseek-v4-pro 2.6 s on a pond probe).
+    order: [opencode-go, opencode, groq, anthropic, ollama]
+    opencode-go:
+      - kimi-k3
+      - deepseek-v4-pro
+      - grok-4.6
+
 limits:
   timeout_s: 30.0
   max_retries: 2

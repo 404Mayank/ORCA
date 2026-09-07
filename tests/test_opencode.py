@@ -254,3 +254,41 @@ def test_provider_status_reports_both_gateways(monkeypatch):
     monkeypatch.setenv("OPENCODE_GO_API_KEY", "k2")
     assert client.provider_status()["opencode"] is True
     assert client.provider_status()["opencode-go"] is True
+
+
+def test_tier_defaults_free_and_rejects_unknown(monkeypatch):
+    _env_off(monkeypatch)
+    assert client.tier() == "free"
+    monkeypatch.setenv("ORCA_TIER", "ludicrous")
+    assert client.tier() == "free"
+    monkeypatch.setenv("ORCA_TIER", "FAST")
+    assert client.tier() == "fast"
+
+
+def test_fast_tier_leads_with_grok_on_go(monkeypatch):
+    _env_off(monkeypatch)
+    monkeypatch.setenv("ORCA_TIER", "fast")
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
+    script = _Script(_responses_payload("via grok"))
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client.complete("deliberator", "sys", "user")
+    assert result.ok and result.provider == "opencode-go"
+    assert result.model == "grok-4.6"
+    assert script.urls() == ["https://opencode.ai/zen/go/v1/responses"]
+
+
+def test_paid_tier_leads_with_kimi_k3(monkeypatch):
+    _env_off(monkeypatch)
+    monkeypatch.setenv("ORCA_TIER", "paid")
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
+    script = _Script(_chat_payload("via kimi"))
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client.complete("planner", "sys", "user")
+    assert result.ok and result.model == "kimi-k3"
+    assert script.urls() == ["https://opencode.ai/zen/go/v1/chat/completions"]
+
+
+def test_free_tier_unchanged_without_env(monkeypatch):
+    _env_off(monkeypatch)
+    assert client.tier() == "free"
+    assert client._tier_chains() == {}

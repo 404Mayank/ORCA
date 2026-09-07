@@ -25,7 +25,7 @@ from typing import Literal
 
 from core import config
 
-__all__ = ["LLMResult", "Role", "complete", "provider_status"]
+__all__ = ["LLMResult", "Role", "complete", "provider_status", "tier"]
 
 Role = Literal["planner", "narrator", "deliberator"]
 """Three roles, separated because they carry different risk.
@@ -52,6 +52,21 @@ class LLMResult:
 
 def _models() -> dict:
     return config.load_yaml("models.yaml")
+
+
+_TIERS = ("free", "fast", "paid")
+
+
+def tier() -> str:
+    """Active model tier from ORCA_TIER. Unknown values fall back to free."""
+    name = os.environ.get("ORCA_TIER", "free").strip().lower()
+    return name if name in _TIERS else "free"
+
+
+def _tier_chains() -> dict[str, list[str]]:
+    """Per-provider model chains for the active tier (free = base config)."""
+    tiers = _models().get("tiers") or {}
+    return tiers.get(tier(), {})
 
 
 def provider_status() -> dict[str, bool]:
@@ -195,7 +210,7 @@ def _complete_opencode(role: Role, system: str, user: str) -> LLMResult:
         # test that mocks a later tier passes through here first.
         return LLMResult(ok=False, provider="opencode", error="OPENCODE_API_KEY not set")
     try:
-        models = list(_models()["opencode"]["models"])
+        models = list(_tier_chains().get("opencode", _models()["opencode"]["models"]))
     except (KeyError, TypeError) as exc:
         return LLMResult(ok=False, provider="opencode", error=f"no model chain configured: {exc}")
     if not models:
@@ -250,7 +265,7 @@ def _complete_opencode_go(role: Role, system: str, user: str) -> LLMResult:
     if not key:
         return LLMResult(ok=False, provider="opencode-go", error="OPENCODE_GO_API_KEY not set")
     try:
-        models = list(_models()["opencode-go"]["models"])
+        models = list(_tier_chains().get("opencode-go", _models()["opencode-go"]["models"]))
     except (KeyError, TypeError) as exc:
         return LLMResult(ok=False, provider="opencode-go", error=f"no model chain configured: {exc}")
     if not models:
@@ -526,7 +541,9 @@ def complete(role: Role, system: str, user: str) -> LLMResult:
     reason if both fail; the caller owns what happens next.
     """
     models = _models()
-    order = list(models.get("provider_order") or [models["provider"], models.get("fallback_provider")])
+    tier_chains = _tier_chains()
+    default_order = list(models.get("provider_order") or [models["provider"], models.get("fallback_provider")])
+    order = list(tier_chains.get("order") or default_order) if isinstance(tier_chains, dict) else default_order
     backends = {
         "opencode": _complete_opencode,
         "opencode-go": _complete_opencode_go,
