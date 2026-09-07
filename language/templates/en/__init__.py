@@ -75,6 +75,15 @@ def render(rec: Recommendation) -> str:
     if rec.drivers:
         lines.append(" ".join(_driver_sentence(d) for d in rec.drivers))
 
+    # Verdict-less answers (fishing zones, boundaries, causal explanations,
+    # conditions reports) carry no drivers, so without this their observed
+    # claims would never reach prose -- a conditions report would be a
+    # headline with numbers nowhere in it. Safety answers skip it: their
+    # numbers already appear paired with limits above, and printing them twice
+    # would read as two different findings.
+    if rec.verdict is None and rec.claims:
+        lines.append(" ".join(c.render() for c in rec.claims))
+
     # When it changes, and how fast.
     for driver in rec.drivers:
         trajectory = driver.trajectory

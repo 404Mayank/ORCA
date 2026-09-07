@@ -118,7 +118,7 @@ export interface OperationalGuidance {
   priority: number;
 }
 
-export type QueryType = "pfz_locate" | "safety_assess" | "geofence_check" | "causal_explain";
+export type QueryType = "pfz_locate" | "safety_assess" | "geofence_check" | "causal_explain" | "conditions_report";
 
 export interface Range {
   min: number;

@@ -138,6 +138,14 @@ def validate_plan(
             "is not advising."
         )
 
+    if plan.intent_type is QueryType.CONDITIONS_REPORT and "compute_risk_score" in {
+        s.tool for s in plan.steps
+    }:
+        errors.append(
+            "a conditions_report plan must not call compute_risk_score. "
+            "Reporting is not advising; a report carries no verdict."
+        )
+
     return PlanValidationResult(
         ok=not errors, plan=plan if not errors else None, errors=errors, warnings=warnings
     )
@@ -305,6 +313,49 @@ def _causal_plan() -> dict[str, Any]:
     }
 
 
+def _conditions_plan() -> dict[str, Any]:
+    # Step numbering mirrors the safety plan (s1 place, s2 waves, s3 wind,
+    # s4 tides, s5 alerts) so the shared synthesis helpers -- _negative_findings
+    # reads s5/s4 by id -- work unchanged. No s6: there is no risk step because
+    # there is no verdict. optimise_route is absent too: it requires a vessel
+    # class, and a report that demanded one would be a safety gate in disguise.
+    return {
+        "intent_type": "conditions_report",
+        "is_fallback": True,
+        "steps": [
+            {"id": "s1", "tool": "resolve_place", "args": {"name": "$PLACE"}, "agent": "geospatial"},
+            {
+                "id": "s2",
+                "tool": "wave_forecast",
+                "args": {"lat": "$s1.lat", "lon": "$s1.lon", "hours": 24},
+                "depends_on": ["s1"],
+                "agent": "weather",
+            },
+            {
+                "id": "s3",
+                "tool": "wind_forecast",
+                "args": {"lat": "$s1.lat", "lon": "$s1.lon", "hours": 24},
+                "depends_on": ["s1"],
+                "agent": "weather",
+            },
+            {
+                "id": "s4",
+                "tool": "tides",
+                "args": {"lat": "$s1.lat", "lon": "$s1.lon", "hours": 24},
+                "depends_on": ["s1"],
+                "agent": "weather",
+            },
+            {
+                "id": "s5",
+                "tool": "active_alerts",
+                "args": {"lat": "$s1.lat", "lon": "$s1.lon"},
+                "depends_on": ["s1"],
+                "agent": "weather",
+            },
+        ],
+    }
+
+
 #: Placeholders like ``$PLACE`` are substituted from the resolved intent before
 #: validation. They are not step references -- ``$sN`` is the only reference
 #: syntax -- so they must be filled in, or ``Plan`` will reject them as
@@ -315,6 +366,7 @@ FALLBACK_PLANS = {
     QueryType.PFZ_LOCATE: _pfz_plan,
     QueryType.GEOFENCE_CHECK: _geofence_plan,
     QueryType.CAUSAL_EXPLAIN: _causal_plan,
+    QueryType.CONDITIONS_REPORT: _conditions_plan,
 }
 
 

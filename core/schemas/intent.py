@@ -41,16 +41,23 @@ __all__ = [
 
 
 class QueryType(str, Enum):
-    """The four query types. Phase one adds no more.
+    """The five query types.
 
-    Fixed by CLAUDE.md. Anything that does not fit one of these is a refusal,
-    not a fifth type.
+    ``CONDITIONS_REPORT`` is read-only: tide, weather and alert status for a
+    place, with no verdict and no vessel gate. It exists because "what are
+    conditions near me" is not a safety assessment -- forcing it through
+    ``SAFETY_ASSESS`` demanded a vessel class the user never came for. The
+    fence is in code, not in prompts: any safety phrasing ("safe", "venture",
+    "go out", "safest") routes to ``SAFETY_ASSESS`` even when conditions
+    keywords also match (see ``agents.keyword_intent.safety_phrasing`` and the
+    planner gate). Reporting is not advising.
     """
 
     PFZ_LOCATE = "pfz_locate"
     SAFETY_ASSESS = "safety_assess"
     GEOFENCE_CHECK = "geofence_check"
     CAUSAL_EXPLAIN = "causal_explain"
+    CONDITIONS_REPORT = "conditions_report"
 
 
 class VesselClass(str, Enum):

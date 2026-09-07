@@ -529,6 +529,8 @@ def _fallback_substitutions(intent: Intent) -> dict[str, Any] | None:
         subs["VESSEL_CLASS"] = intent.vessel_class.value
     elif intent.query_type is QueryType.SAFETY_ASSESS:
         return None
+    elif intent.query_type is QueryType.CONDITIONS_REPORT:
+        pass  # place-only by design; no vessel gate on a report
     else:
         subs["VESSEL_CLASS"] = VesselClass.FRP_9M.value  # non-safety: harmless default
     return subs
@@ -661,6 +663,21 @@ def _finish(
 
     intent = apply_inheritance(output.intent, context)
     output = output.model_copy(update={"intent": intent})
+
+    # Gate 1a: the reporting/advising fence, applied in code. The prompt tells
+    # the model that safety phrasing means safety_assess, but if it returns a
+    # conditions report for "is it safest to go out" anyway, the vessel gate
+    # must still fire. Rewriting the type here (rather than refusing) is
+    # correct: the question is real, it just needs a boat before it can run.
+    if intent.query_type is QueryType.CONDITIONS_REPORT and keyword_intent.safety_phrasing(
+        intent.raw_query or query
+    ):
+        notes.append(
+            "model returned conditions_report for safety phrasing; "
+            "re-routed to safety_assess so the vessel gate fires"
+        )
+        intent = intent.model_copy(update={"query_type": QueryType.SAFETY_ASSESS})
+        output = output.model_copy(update={"intent": intent})
 
     # Gate 1: the governing rule. Code decides this, not the model.
     gaps = intent.blocking_gaps()
