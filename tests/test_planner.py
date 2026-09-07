@@ -64,6 +64,13 @@ def _stub_sequence(monkeypatch, *responses):
     calls = iter(responses)
 
     def fake_complete(role, system, user):
+        # The router runs before the planner on every turn. It is not part of
+        # any script below: it always answers "not small talk, plan it" so
+        # the scripted replies reach the planner call they were written for.
+        # (Added 2026-09-07 with the router; every script here predates it.)
+        routed = _router_passthrough(role, system, user)
+        if routed is not None:
+            return routed
         # "planner" for the structured call and its retry; "deliberator" for
         # the conversational retry that follows a schema failure, which runs
         # on the cheaper model because it asks for a sentence, not a DAG.
@@ -74,6 +81,22 @@ def _stub_sequence(monkeypatch, *responses):
         return LLMResult(ok=True, text=item, provider="stub", model="stub-model")
 
     monkeypatch.setattr(planner.llm, "complete", fake_complete)
+
+
+_ROUTER_SYSTEM = planner.ROUTER_PATH.read_text(encoding="utf-8")
+_ROUTER_QUERY = LLMResult(ok=True, text='{"kind": "query"}', provider="stub", model="stub-model")
+
+
+def _router_passthrough(role, system, user):
+    """Answer the router's chat-vs-query question without consuming a script.
+
+    Returns a "plan it" verdict for router calls, None for everything else.
+    Custom fakes in this module call this first so the router never shifts
+    their scripted sequences by one.
+    """
+    if system == _ROUTER_SYSTEM:
+        return _ROUTER_QUERY
+    return None
 
 
 # ==========================================================================
@@ -202,6 +225,9 @@ def test_an_invalid_plan_gets_one_replan_with_the_errors_fed_back(monkeypatch):
     seen: list[str] = []
 
     def fake_complete(role, system, user):
+        routed = _router_passthrough(role, system, user)
+        if routed is not None:
+            return routed
         seen.append(user)
         return LLMResult(ok=True, text=json.dumps(bad) if len(seen) == 1 else _good_plan_json(), provider="stub", model="m")
 
@@ -421,13 +447,16 @@ def test_the_prompt_is_a_markdown_file_with_the_tool_block_injected():
     assert "{TOOLS}" in raw, "the template must carry the placeholder, not a tool list"
     rendered = planner._system_prompt()
     assert "{TOOLS}" not in rendered
-    assert "**compute_risk_score**" in rendered
+    assert "compute_risk_score(" in rendered
     # Derived from the registry rather than naming a tool, so that finishing
     # a tool cannot turn this assertion false. It broke exactly that way when
-    # pfz_candidates was implemented on 2026-09-06.
+    # pfz_candidates was implemented on 2026-09-06. The compact block lists
+    # one `- name(args)` line per implemented tool.
     for spec in registry.all_specs():
-        if not spec.implemented:
-            assert f"**{spec.name}**" not in rendered, (
+        if spec.implemented:
+            assert f"- {spec.name}(" in rendered, f"{spec.name} runs but is not offered"
+        else:
+            assert f"- {spec.name}(" not in rendered, (
                 f"{spec.name} has no implementation and must not be offered to the planner"
             )
 
@@ -525,16 +554,27 @@ def test_pleasantries_are_answered_not_interrogated(greeting, monkeypatch):
     now goes to the model like everything else; what must hold is that it is
     *answered*, not interrogated.
     """
-    _stub_sequence(
-        monkeypatch,
-        json.dumps(
-            {
-                "intent": {"query_type": None},
-                "state": "chat",
-                "chat": {"text": "Hello. What do you need?", "suggestions": ["Is it safe out?"]},
-            }
-        ),
-    )
+    def fake_complete(role, system, user):
+        # The router must ask first, and its answer is the whole test: this
+        # turn is small talk, answered in the model's own voice. The planner
+        # must never be called for a greeting.
+        assert _router_passthrough(role, system, user) is not None, (
+            f"planner-tier call for a greeting: role={role}"
+        )
+        return LLMResult(
+            ok=True,
+            text=json.dumps(
+                {
+                    "kind": "chat",
+                    "text": "Hello. What do you need?",
+                    "suggestions": ["Is it safe out?"],
+                }
+            ),
+            provider="stub",
+            model="stub-model",
+        )
+
+    monkeypatch.setattr(planner.llm, "complete", fake_complete)
     result = plan_query(greeting)
     assert result.state == "chat"
     assert result.output.chat.text.strip()
@@ -561,23 +601,33 @@ def test_a_chat_turn_may_leave_the_query_type_null():
     assert out.chat.text == "I am ORCA."
 
 
-def test_a_null_query_type_is_still_rejected_on_every_other_state():
-    """The placeholder is safe only because a chat turn never reaches planning.
+def test_a_null_query_type_is_filled_never_propagated():
+    """A null query type is completed by the parser, not rejected.
 
-    A plan or a clarification with no query type is a real failure and must
-    still fail loudly.
+    The model correctly leaves `query_type` null on turns it cannot classify
+    (chat) or will not commit to yet (a bare clarification). Rejecting that
+    null discarded answers the model had understood -- found live on
+    2026-09-07, three turns in one session. The parser now fills a safe
+    placeholder instead: chat turns never reach planning (Gate 0b returns
+    first), and a clarification asks for its missing slot either way, with
+    safety_assess -- the most cautious type, the one that refuses to guess --
+    as the fallback guess. What must never happen is a null reaching the
+    executor, and no path constructs one.
     """
     import pytest as _pytest
 
     from agents.intent_planner_agent import parse_planner_json
 
+    out = parse_planner_json(
+        '{"intent": {"query_type": null}, "state": "clarification",'
+        ' "clarification": {"missing_slots": ["vessel_class"],'
+        ' "question_template": "What boat?", "options": []}}',
+        "is it safe?",
+    )
+    assert out.state == "clarification"
+    assert out.intent.query_type is not None
     with _pytest.raises(Exception):
-        parse_planner_json(
-            '{"intent": {"query_type": null}, "state": "clarification",'
-            ' "clarification": {"missing_slots": ["vessel_class"],'
-            ' "question_template": "What boat?", "options": []}}',
-            "is it safe?",
-        )
+        parse_planner_json("no json object here", "is it safe?")
 
 
 def test_a_chat_reply_can_never_carry_a_number():

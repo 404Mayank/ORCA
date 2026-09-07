@@ -2,9 +2,22 @@
 
 Living status document. Updated as work lands, not as it is planned.
 
-**Last updated:** 2026-09-07 · **Tests:** 347 passing, 5 skipped · **Head:** Phase 4 · **Tools:** 14/14 · **LLM:** Groq, 4 keys
+**Last updated:** 2026-09-07 · **Tests:** 376 passing, 15 skipped, 0 failed (venv, with weather+alert cache) · **Head:** Phase 4 + streams 0-4, 6 · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
 
 ---
+
+## What landed on 2026-09-07 (night) — stacked hardening: Zen, conditions, geo-data, RAG, green suite
+
+Five stacked PRs (404Mayank/ORCA, #1-#5), each reviewed against a critiquer before merging, plus this test-env stream:
+
+- **Repo surgery.** The tree lived under `ORCA-main/` in the index with the real project untracked. Moved to root, real `.gitignore`, editable install fixed (explicit package list), `.env.example` restored + `OPENCODE_API_KEY`.
+- **OpenCode Zen provider** (`orchestrator/llm/client.py`, first in `provider_order`): chat/completions only, missing-key fast-fail with no socket call, 429 falls through, never raises. Role split planner kimi-k2.6 / deliberator deepseek-v4-flash / narrator kimi-k2.5, ids verified against the live roster. No key in this shell, so no live inference check yet.
+- **`conditions_report`.** Read-only tide/weather/alert answers, no verdict, place-only. The fence is code on both tiers: safety-decisive language (one weight>=2 safety term) routes to `safety_assess` at any margin; validator forbids `compute_risk_score`; renderer prints observed claims only on verdict-less answers (safety text unchanged). 15 tests.
+- **Geo-data.** Gazetteer 7 -> 20 points, each new coordinate independently verified against OSM Nominatim (drifts and single-source caveats recorded, confidence 0.85/0.9, never 1.0). Dataset registry populated; INCOIS loader + catalogue lookup implemented. MPA polygon attempted via the WDPA mirror and honestly NOT committed (absent from the snapshot); re-runnable checker script kept; geofence still reports mpa/eez unavailable.
+- **Gated RAG.** PostgREST FTS over httpx (zero new deps), disabled-by-default, fail-closed; strip_numbers barrier in code; corpus from cited in-repo text only; propose() TESTS gate unchanged.
+- **Suite honesty.** The claimed "347 passing" did not collect here (missing geo deps + 21 router-drifted planner tests + live-cache-dependent synthesis tests). Repaired: router-aware stubs, Gate-0-removal updates, live-cache skip idiom (`succeeded()` not `is not None`), real weather+alert cache via refresh. Now **376 passed, 15 skipped, 0 failed**; skips are satellite-cache-dependent only. Ruff: new/changed files clean; 185 pre-existing repo-wide violations left alone.
+
+Deferred explicitly: Tamil/i18n (AI first, owner call), Supabase cloud provisioning, docker-compose (no pg driver by design).
 
 ## What landed on 2026-09-07 (later) — the conversation belongs to the model
 

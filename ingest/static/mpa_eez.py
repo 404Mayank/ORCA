@@ -25,7 +25,7 @@ import json
 import urllib.parse
 import urllib.request
 
-__all__ = ["GOM_ENVELOPE", "wdpa_sites_in_envelope", "main"]
+__all__ = ["GOM_ENVELOPE", "main", "wdpa_sites_in_envelope"]
 
 WDPA_URL = (
     "https://data-gis.unep-wcmc.org/server/rest/services/ProtectedSites/"

@@ -93,7 +93,7 @@ def _dataset_docs() -> list[Doc]:
 
 
 def _climatology_doc() -> Doc:
-    import ingest.climatology as climatology
+    from ingest import climatology
 
     return Doc(
         source="ingest/climatology.py#sensor-choice",

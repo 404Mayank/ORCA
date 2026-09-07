@@ -13,8 +13,6 @@ import io
 import json
 import urllib.error
 
-import pytest
-
 from orchestrator.llm import client
 
 
