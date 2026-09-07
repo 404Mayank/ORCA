@@ -766,6 +766,22 @@ def _plan_without_llm(
     Tier 2 is a substitute for the model, not a shortcut past it. It is reached
     only after every provider has failed.
     """
+    # A greeting carries no request, so planning it from context manufactures
+    # one. Found live on 2026-09-06: after a fishing-zone question, typing
+    # "hello" returned a full fishing-zone answer. With a model the router
+    # answers conversationally; without one the honest answer is the offline
+    # chat message, not a re-run of the previous question.
+    if keyword_intent.is_conversational_filler(query):
+        notes = notes + ["no LLM; greeting answered conversationally, slots withheld"]
+        return PlanningResult(
+            output=_chat(
+                query,
+                "I cannot reach my language model at the moment, so I can only "
+                "take the standard questions right now. " + CAPABILITIES,
+            ),
+            attempts=attempts,
+            notes=notes,
+        )
     if context is None:
         guess = keyword_intent.classify(query)
         if guess is not None:
