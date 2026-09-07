@@ -4,7 +4,7 @@
     {
       "name": "orca-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "ORCA-main/frontend", "run", "dev"],
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
       "port": 5173
     }
   ]
