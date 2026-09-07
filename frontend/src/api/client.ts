@@ -12,6 +12,13 @@ export interface ReadinessLayer {
   observation_age_days?: number | null;
   dataset?: string;
   in_force?: number | null;
+  stale?: boolean | null;
+  max_age_hours?: number | null;
+  max_age_days?: number | null;
+  operator_checked?: boolean | null;
+  operator_age_hours?: number | null;
+  operator_max_age_hours?: number | null;
+  operator_reviewed_at?: string | null;
 }
 
 export interface Readiness {

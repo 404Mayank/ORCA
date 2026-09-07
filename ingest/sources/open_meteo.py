@@ -166,14 +166,22 @@ def load_cached(endpoint: str, lat: float, lon: float) -> CachedResponse | None:
     )
     if not candidates:
         return None
-    record = json.loads(candidates[0].read_text(encoding="utf-8"))
-    return CachedResponse(
-        endpoint=record["endpoint"],
-        url=record["url"],
-        params=record["params"],
-        fetched_at=datetime.fromisoformat(record["fetched_at"]),
-        payload=record["payload"],
-    )
+    try:
+        record = json.loads(candidates[0].read_text(encoding="utf-8"))
+        return CachedResponse(
+            endpoint=record["endpoint"],
+            url=record["url"],
+            params=record["params"],
+            fetched_at=datetime.fromisoformat(record["fetched_at"]),
+            payload=record["payload"],
+        )
+    except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError):
+        # A half-written or corrupt file is "nothing cached", never a 500.
+        # Writes are write-then-rename so this should be rare, but a crash
+        # mid-cycle or a hand-edited file must degrade, not crash readiness.
+        # Mirrors the guarded reads in gdacs.load_cached and
+        # erddap.load_cached, which already treat a bad file as a miss.
+        return None
 
 
 # --------------------------------------------------------------------------

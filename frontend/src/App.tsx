@@ -667,6 +667,9 @@ export default function App() {
                     cached: alertsLayer.cached,
                     in_force: alertsLayer.in_force,
                     retrieved_at: alertsLayer.retrieved_at,
+                    operator_checked: alertsLayer.operator_checked,
+                    operator_age_hours: alertsLayer.operator_age_hours,
+                    operator_max_age_hours: alertsLayer.operator_max_age_hours,
                   }
                 : null
             }

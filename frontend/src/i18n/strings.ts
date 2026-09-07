@@ -257,9 +257,13 @@ const en = {
     alerts: {
       title: "Alerts",
       inForce: "{n} advisor{s} in force",
-      noneChecked: "No advisories in force — checked {at}.",
+      noneChecked: "No cyclone advisories in force — checked {at}.",
       unchecked:
-        "The alert feed has not been checked in this cache, so safety answers qualify accordingly.",
+        "The cyclone feed has not been checked in this cache, so safety answers qualify accordingly.",
+      waveStale:
+        "Wave and swell-surge checks are stale — the operator table was reviewed {n} h ago (limit {m} h).",
+      waveUnchecked:
+        "Wave and swell-surge checks are unchecked — no usable operator table review.",
       askAbout: "Ask about alerts off Nagapattinam",
       askPrompt: "Are there any cyclone or high-wave alerts off Nagapattinam?",
     },
@@ -306,6 +310,12 @@ const en = {
       dataSub: "What the cache holds, and how old it is. Filled by scripts/refresh_cache.py, never during a question.",
       cached: "cached",
       missing: "missing",
+      stale: "stale — refresh cache",
+      ageMinutes: "{n} min old",
+      alertsScope: "cyclone check only (GDACS)",
+      waveTableChecked: "wave table checked",
+      waveTableStale: "wave table stale ({n} h)",
+      waveTableUnchecked: "wave table unchecked",
       inForce: "{n} in force",
       layerNames: {
         weather: "Weather",

@@ -12,6 +12,13 @@ export interface LayerStatus {
   observation_age_days?: number | null;
   in_force?: number | null;
   retrieved_at?: string | null;
+  stale?: boolean | null;
+  max_age_hours?: number | null;
+  max_age_days?: number | null;
+  operator_checked?: boolean | null;
+  operator_age_hours?: number | null;
+  operator_max_age_hours?: number | null;
+  operator_reviewed_at?: string | null;
 }
 
 interface Props {
@@ -241,6 +248,10 @@ function AlertsPane({ alerts, onAskAlerts }: Props) {
   const c = str.sheets.alerts;
   const cached = alerts?.cached === true;
   const inForce = alerts?.in_force ?? null;
+  // The cyclone cache (GDACS) and the operator wave table go stale on
+  // different clocks. A fresh cyclone negative finding stands on its own,
+  // but it must not read as a full all-clear when the wave half is overdue.
+  const waveStale = alerts?.operator_checked === false;
   return (
     <>
       {cached && inForce != null && inForce > 0 && (
@@ -255,6 +266,16 @@ function AlertsPane({ alerts, onAskAlerts }: Props) {
         </div>
       )}
       {!cached && <div className="sheet-note">{c.unchecked}</div>}
+      {waveStale && (
+        <div className="sheet-note">
+          {alerts?.operator_age_hours != null
+            ? fill(c.waveStale, {
+                n: Math.round(alerts.operator_age_hours),
+                m: alerts?.operator_max_age_hours ?? "—",
+              })
+            : c.waveUnchecked}
+        </div>
+      )}
       <div className="sheet-note">
         <button className="chip" onClick={onAskAlerts}>
           {c.askAbout}
@@ -410,20 +431,48 @@ function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, on
       {hint && <div className="sheet-note mono-note">{hint}</div>}
       {Object.entries(layers).map(([name, layer]) => {
         // One joined sub-line: no stray separators, and no empty row when
-        // a layer carries nothing but cached/missing (alerts have no age,
-        // uncached ocean layers have no age and no count).
+        // a layer carries nothing but a state (uncached ocean layers have
+        // no age and no count).
         const parts: string[] = [];
-        if (layer.age_hours != null) parts.push(fill(c.ageHours, { n: Math.round(layer.age_hours) }));
+        if (layer.age_hours != null) {
+          // Sub-hour ages read as minutes: rounding 24 min to "0 h old"
+          // looks fresher than it is, and one decimal under 10 h keeps a
+          // 90-minute-old cache from reading as either 1 or 2 hours.
+          const h = layer.age_hours;
+          parts.push(
+            h < 1
+              ? fill(c.ageMinutes, { n: Math.max(1, Math.round(h * 60)) })
+              : fill(c.ageHours, { n: h < 10 ? Math.round(h * 10) / 10 : Math.round(h) }),
+          );
+        }
         if (layer.observation_age_days != null) {
           const days = Math.round(layer.observation_age_days * 10) / 10;
           parts.push(fill(c.ageDays, { n: days }));
         }
         if (layer.in_force != null) parts.push(fill(c.inForce, { n: layer.in_force }));
+        if (name === "alerts") {
+          // This row has only ever been the GDACS cyclone check. Say so,
+          // and say whether the operator wave table behind high-wave /
+          // swell-surge answers is itself fresh -- a fresh cyclone cache
+          // must not mask a stale wave table.
+          parts.push(c.alertsScope);
+          if (layer.operator_checked === true) parts.push(c.waveTableChecked);
+          else if (layer.operator_checked === false) {
+            parts.push(
+              layer.operator_age_hours != null
+                ? fill(c.waveTableStale, { n: Math.round(layer.operator_age_hours) })
+                : c.waveTableUnchecked,
+            );
+          }
+        }
+        // A stale layer still has a file on disk, but the file is too old
+        // to support a verdict: it renders as stale, never as healthy.
+        const state = layer.stale ? c.stale : layer.cached ? c.cached : c.missing;
         return (
           <div className="sheet-row" key={name}>
             <div className="row-top">
               <b>{c.layerNames[name] ?? name}</b>
-              <span className="row-meta">{layer.cached ? c.cached : c.missing}</span>
+              <span className="row-meta">{state}</span>
             </div>
             {parts.length > 0 && <span className="row-meta">{parts.join(" · ")}</span>}
           </div>
