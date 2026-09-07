@@ -62,7 +62,15 @@ export default function Bridge({ theme, settings, feed, busy, trace, onSend, onO
           </p>
           <h1>{hero.title}</h1>
           <svg className="hero-wave" viewBox="0 0 300 24" aria-hidden="true">
-            <path d="M4 14 C 40 6, 70 6, 104 14 S 170 22, 204 14 S 270 6, 296 14" pathLength={1} />
+            <defs>
+              <linearGradient id="heroGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stopColor="#14b8a6" />
+                <stop offset="0.45" stopColor="#60a5fa" />
+                <stop offset="0.75" stopColor="#a78bfa" />
+                <stop offset="1" stopColor="#e879f9" />
+              </linearGradient>
+            </defs>
+            <path d="M4 14 C 40 6, 70 6, 104 14 S 170 22, 204 14 S 270 6, 296 14" pathLength={1} stroke="url(#heroGrad)" />
           </svg>
           <p className="hero-sub">{hero.sub}</p>
         </section>

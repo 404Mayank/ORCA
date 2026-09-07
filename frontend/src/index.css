@@ -30,6 +30,10 @@
   --red: #bc4331;
   --blue: #1e4e7a;
   --amber: #b07a17;
+  /* Premium AI accent: magenta end of the blue->violet->magenta spectrum
+     (the Gemini-style gradient). Decorative ONLY -- verdict hues
+     (green/red/amber) stay exclusive to the verdict stamp. */
+  --ai-pink: #c93fe3;
   --frame-shadow:
     0 1px 1px rgba(10, 30, 40, 0.04), 0 24px 60px -28px rgba(10, 30, 40, 0.42);
   --lift:
@@ -54,6 +58,7 @@
   --red: #e4715c;
   --blue: #5c9cd2;
   --amber: #d8a13c;
+  --ai-pink: #ef7bff;
   --frame-shadow:
     0 1px 1px rgba(0, 0, 0, 0.3), 0 24px 60px -28px rgba(0, 0, 0, 0.8);
   --lift:
@@ -88,6 +93,92 @@ button:disabled { cursor: default; }
   background: var(--chart);
   overflow: hidden;
   position: relative;
+}
+
+/* ---------- edge flow: living rim around the box ---------- */
+/* Multicolor conic beam (teal -> blue -> violet -> teal) masked to a 2px
+   rim around the whole frame. Decorative ONLY: none of these hues carries
+   meaning -- green/red/amber stay exclusive to the verdict stamp. The
+   rotation animates a registered custom prop so it is opacity/transform
+   adjacent (no layout), paused under reduced-motion. */
+@property --flow-a {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+@property --flow-b {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+.frame::before {
+  content: "";
+  position: absolute; inset: 0; z-index: 7;
+  border-radius: inherit;
+  padding: 3px;
+  /* Base rim: teal -> blue -> violet, twice around, with two near-white
+     comet bands. Rotating the conic's `from` angle drives the comets
+     around the perimeter -- the sweep -- while every edge point cycles
+     hues. White reads as light, never as status. */
+  background: conic-gradient(
+    from var(--flow-a) at 50% 50%,
+    color-mix(in srgb, var(--teal) 90%, transparent) 0deg,
+    color-mix(in srgb, var(--blue) 90%, transparent) 38deg,
+    #7a6ff0 72deg,
+    #eafffb 104deg, #eafffb 114deg,
+    color-mix(in srgb, var(--blue) 90%, transparent) 142deg,
+    color-mix(in srgb, var(--teal) 90%, transparent) 180deg,
+    color-mix(in srgb, var(--blue) 90%, transparent) 218deg,
+    var(--ai-pink) 252deg,
+    #eafffb 284deg, #eafffb 294deg,
+    color-mix(in srgb, var(--blue) 90%, transparent) 322deg,
+    color-mix(in srgb, var(--teal) 90%, transparent) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  opacity: 0.85;
+  pointer-events: none;
+  animation: flow-spin 10s linear infinite;
+}
+/* Drift layer: cyan-shifted twin rim on the same mask, counter-rotating
+   slower and breathing in opacity. Where it overlaps the base rim the
+   visible hue shifts over time -- the color-shift -- without ever leaving
+   the teal/blue/violet family. Decorative only. */
+.frame::after {
+  content: "";
+  position: absolute; inset: 0; z-index: 7;
+  border-radius: inherit;
+  padding: 3px;
+  background: conic-gradient(
+    from var(--flow-b) at 50% 50%,
+    #6fd9e0 0deg,
+    color-mix(in srgb, var(--blue) 85%, transparent) 60deg,
+    var(--ai-pink) 120deg,
+    color-mix(in srgb, var(--teal) 85%, transparent) 180deg,
+    #6fd9e0 240deg,
+    #8a7ff5 300deg,
+    #6fd9e0 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation:
+    flow-spin-rev 16s linear infinite,
+    flow-breathe 6s ease-in-out infinite;
+}
+@keyframes flow-spin {
+  to { --flow-a: 360deg; }
+}
+@keyframes flow-spin-rev {
+  to { --flow-b: -360deg; }
+}
+@keyframes flow-breathe {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.65; }
 }
 
 /* ---------- rail ---------- */
@@ -148,6 +239,53 @@ button:disabled { cursor: default; }
 
 /* ---------- canvas (bridge) ---------- */
 .canvas { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: auto; }
+/* Pointer-reactive current wash: teal + blue radials following --glow-x/y
+   (written by useGlow, rAF-throttled, no React state). Sits with the chart
+   at z 0, behind graticule and content; opacity-only downstream. */
+/* Autonomous wander: the highlight drifts on its own --drift-x/y loops
+   (26 s + 37 s, uneven so the path never obviously repeats) instead of
+   chasing the pointer. Typing still boosts it via --glow-on; position is
+   free-running. Parallax (#chart) and the composer halo keep using the
+   pointer-driven --glow-x/y. */
+@property --drift-x {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.5;
+}
+@property --drift-y {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.5;
+}
+.canvas::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(
+      460px circle at calc(var(--drift-x, 0.5) * 100%) calc(var(--drift-y, 0.5) * 100%),
+      color-mix(in srgb, var(--teal) 14%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      640px circle at calc((1 - var(--drift-x, 0.5)) * 100%) calc((1 - var(--drift-y, 0.5)) * 100%),
+      color-mix(in srgb, var(--blue) 12%, transparent),
+      transparent 70%
+    );
+  opacity: calc(0.55 + var(--glow-on, 0) * 0.45);
+  transition: opacity 0.5s ease;
+  animation:
+    drift-x 26s ease-in-out infinite alternate,
+    drift-y 37s ease-in-out infinite alternate;
+}
+@keyframes drift-x {
+  from { --drift-x: 0.12; }
+  50% { --drift-x: 0.85; }
+  to { --drift-x: 0.3; }
+}
+@keyframes drift-y {
+  from { --drift-y: 0.2; }
+  50% { --drift-y: 0.75; }
+  to { --drift-y: 0.55; }
+}
 #chart { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
 .grat {
   position: absolute; z-index: 1; pointer-events: none;
@@ -242,7 +380,7 @@ h1 {
 }
 .hero-wave path {
   fill: none;
-  stroke: var(--teal);
+  stroke: url(#heroGrad);
   stroke-width: 3;
   stroke-linecap: round;
   stroke-dasharray: 1;
@@ -329,32 +467,100 @@ h1 {
      stays right even when the hint is hidden on phones. */
   margin-left: auto;
   width: 40px; height: 40px; border-radius: 50%; flex: none;
-  background: var(--teal); color: #fff;
+  background: linear-gradient(135deg, var(--blue), #7a6ff0 55%, var(--ai-pink));
+  color: #fff;
   display: grid; place-items: center;
   transition: transform 0.16s ease, filter 0.16s ease, opacity 0.16s ease;
 }
 .send:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.08); }
 .send:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* ---------- pipeline trace ---------- */
-.pipeline { display: flex; flex-direction: column; gap: 7px; padding: 6px 0 2px; }
-.pipeline-row {
-  display: flex; align-items: baseline; gap: 8px; min-width: 0;
-  font-size: 12.5px; animation: rise 0.3s ease both;
+/* ---------- brewing card ---------- */
+/* The waiting state. Renders only backend-reported stages, agent chips
+   and verbatim assessments; the only live number is the elapsed clock.
+   Animations: shimmer bar, breathing beacon, staggered dots, breathing
+   send button -- all killed under prefers-reduced-motion. */
+.brew {
+  width: 100%;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 14px;
+  padding: 13px 16px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 1px 2px rgba(10, 30, 40, 0.04);
 }
-.pipeline-row .beacon { align-self: center; }
-.pipeline-stage {
+.brew.compact { padding: 10px 13px 11px; gap: 8px; border-radius: 12px; }
+.brew-slot { margin-top: -14px; }
+.brew-bar {
+  height: 2px; border-radius: 1px; background: var(--line);
+  position: relative; overflow: hidden;
+}
+.brew-bar::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent,
+    color-mix(in srgb, var(--teal) 75%, transparent), transparent);
+  animation: brew-shimmer 1.8s ease-in-out infinite;
+}
+@keyframes brew-shimmer { to { transform: translateX(100%); } }
+.brew-head { display: flex; align-items: center; gap: 8px; }
+.brew-title {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2);
+}
+.brew-elapsed {
+  margin-left: auto;
   font-family: "IBM Plex Mono", monospace; font-size: 10px;
-  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-2);
-  white-space: nowrap;
+  letter-spacing: 0.05em; color: var(--ink-3); font-variant-numeric: tabular-nums;
 }
-.pipeline-agent {
-  font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--teal);
-  white-space: nowrap;
+.brew-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.brew.compact .brew-stages { gap: 4px; }
+.brew-stage {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--ink-3);
+  transition: color 0.2s ease;
 }
-.pipeline-note {
-  color: var(--ink-3); white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; min-width: 0;
+.brew.compact .brew-stage { font-size: 11.5px; }
+.brew-stage.done { opacity: 0.6; }
+.brew-stage.active { color: var(--ink); font-weight: 600; }
+.brew-mark { width: 13px; flex: none; display: inline-flex; justify-content: center; }
+.brew-stage.done .brew-mark::before { content: "✓"; color: var(--teal); }
+.brew-stage.active .brew-mark::before {
+  content: "●"; color: var(--teal);
+  animation: brew-breathe 1.4s ease-in-out infinite;
+}
+.brew-stage.todo .brew-mark::before { content: "○"; }
+@keyframes brew-breathe { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+.brew-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.brew-agent {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.05em;
+  border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px;
+  color: var(--ink-3); background: var(--paper-2);
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.brew-agent.active { border-color: var(--teal); color: var(--teal); }
+/* Verbatim agent assessment, verbatim by contract: CSS ellipsis is the
+   only truncation, so the full string stays in the DOM for readers. */
+.brew-say {
+  margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-2);
+  border-left: 2px solid var(--isobath); padding-left: 10px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Busy-line staged dots (pre-first-event fallback on the bridge). */
+.dots { display: inline-flex; gap: 3px; margin-left: 2px; }
+.dots i {
+  width: 4px; height: 4px; border-radius: 50%; background: var(--ink-3);
+  animation: brew-breathe 1.2s ease-in-out infinite;
+}
+.dots i:nth-child(2) { animation-delay: 0.15s; }
+.dots i:nth-child(3) { animation-delay: 0.3s; }
+/* Send button breathes only while a turn is in flight (.waiting is set
+   from the busy prop, never from the empty-input disabled state). */
+.send.waiting { animation: send-breathe 1.6s ease-in-out infinite; }
+@keyframes send-breathe {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.06); filter: brightness(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brew-bar::after, .dots, .send.waiting { animation: none; display: none; }
+  .brew-stage.active .brew-mark::before { animation: none; }
 }
 
 /* ---------- answer reveal ---------- */
