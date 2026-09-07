@@ -107,8 +107,12 @@ docs/           verified_sources.md, ideal_answers/
 
 ## Documents worth reading first
 
+- **`docs/ONBOARDING.md`** — new here? Start here (setup, secrets, run, map)
 - **`CLAUDE.md`** — the architecture and the rules that do not bend
 - **`PROGRESS.md`** — what actually works today, what blocks what
+- **`docs/DECISIONS.md`** — why things are the way they are, one line each
+- **`docs/RUNBOOK.md`** — operate and demo (ingest, tiers, troubleshooting)
+- **`CONTRIBUTING.md`** — the workflow contract for sending work back
 - **`docs/verified_sources.md`** — every external fact, with reproduction steps
   and the ones that turned out to be false
 - **`config/risk_thresholds.yaml`** — the file to open when a judge asks
