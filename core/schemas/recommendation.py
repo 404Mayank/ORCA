@@ -33,6 +33,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.schemas.intent import QueryType, Refusal, VesselClass
+from core.schemas.tool_io import GeoPoint
 from core.units import Range, ThresholdEvaluation
 
 __all__ = [
@@ -45,6 +46,7 @@ __all__ = [
     "Driver",
     "TurnBackBasis",
     "Window",
+    "Route",
     "NegativeFinding",
     "Claim",
     "Hypothesis",
@@ -348,6 +350,37 @@ class Window(BaseModel):
     @property
     def workable_hours(self) -> float:
         return (self.turn_back - self.opens).total_seconds() / 3600.0
+
+
+# --------------------------------------------------------------------------
+# Route -- the verified shelter leg
+# --------------------------------------------------------------------------
+
+
+class Route(BaseModel):
+    """The shelter-leg polyline, origin to nearest shelter.
+
+    Every waypoint comes verbatim from the cited ``optimise_route`` output
+    (already 4dp at the tool); the LLM never emits geometry. ``computed_by``
+    names the tool call, so the verifier can prove provenance against the
+    log. Absent (None) whenever the route tool failed or never ran -- never
+    a partial polyline.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    waypoints: list[GeoPoint] = Field(
+        min_length=2,
+        description="Shelter-leg polyline, verbatim from optimise_route().",
+    )
+    distance_km: float = Field(ge=0.0)
+    estimated_hours: float = Field(ge=0.0)
+    destination_name: str | None = Field(
+        default=None, description="Shelter name from nearest_landing_centre()."
+    )
+    computed_by: str = Field(
+        min_length=1, description="tool_call_id of the optimise_route() call. Required."
+    )
 
 
 # --------------------------------------------------------------------------
@@ -723,6 +756,7 @@ class Recommendation(BaseModel):
     alternatives: list[Alternative] = Field(default_factory=list)
 
     window: Window | None = None
+    route: Route | None = None
     spatial_context: SpatialContext | None = None
 
     assumptions: list[Assumption] = Field(default_factory=list)
@@ -796,6 +830,8 @@ class Recommendation(BaseModel):
             check([self.verdict.computed_by], "verdict.computed_by")
         if self.window is not None:
             check([self.window.basis], "window.basis")
+        if self.route is not None:
+            check([self.route.computed_by], "route.computed_by")
         if self.spatial_context and self.spatial_context.origin:
             check([self.spatial_context.origin.resolved_by], "spatial_context.origin")
 

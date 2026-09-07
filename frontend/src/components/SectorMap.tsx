@@ -50,6 +50,12 @@ export default function SectorMap({ recommendation, imbl }: Props) {
             {str.side.legendBoundary}
           </div>
         )}
+        {recommendation?.route && recommendation.route.waypoints.length > 1 && (
+          <div style={{ ["--k" as string]: "var(--blue)" }}>
+            <i className="dash" />
+            {str.side.legendRoute}
+          </div>
+        )}
       </div>
     </div>
   );

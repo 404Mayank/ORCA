@@ -33,6 +33,47 @@ export default function MapView({ recommendation, imbl }: Props) {
   const imblDrawn = useRef(false);
   const imblRef = useRef(imbl);
   imblRef.current = imbl;
+  const routeDrawn = useRef(false);
+  const recRef = useRef<Recommendation | null>(null);
+
+  const clearRoute = () => {
+    const m = map.current;
+    if (!m) return;
+    // getLayer/getSource guards: style may not be loaded on this tick.
+    try {
+      if (m.getLayer("route-line")) m.removeLayer("route-line");
+      if (m.getSource("route")) m.removeSource("route");
+    } catch {
+      /* style not ready -- nothing drawn yet */
+    }
+    routeDrawn.current = false;
+  };
+
+  const drawRoute = (rec: Recommendation | null) => {
+    const m = map.current;
+    const points = rec?.route?.waypoints;
+    if (!m || !points || points.length < 2 || routeDrawn.current) return;
+    if (!m.isStyleLoaded()) return;
+    // Coordinates come ONLY from rec.route.waypoints -- the verified tool
+    // output -- never reconstructed, never from visual_layers.
+    const coords = points.map((p) => [p.lon, p.lat]);
+    m.addSource("route", {
+      type: "geojson",
+      data: {
+        type: "Feature",
+        properties: {},
+        geometry: { type: "LineString", coordinates: coords },
+      },
+    });
+    m.addLayer({
+      id: "route-line", type: "line", source: "route",
+      // Neutral blue solid: verdict hues stay exclusive to the origin
+      // marker (VERDICT_COLOUR above). A shelter leg is guidance, not a
+      // verdict, so it must not borrow the red/green vocabulary.
+      paint: { "line-color": "#4a9eff", "line-width": 2.5 },
+    });
+    routeDrawn.current = true;
+  };
 
   const drawImbl = () => {
     const m = map.current;
@@ -97,6 +138,7 @@ export default function MapView({ recommendation, imbl }: Props) {
         paint: { "line-color": "#4a9eff", "line-width": 1.5, "line-dasharray": [3, 3] },
       });
       drawImbl();
+      drawRoute(recRef.current);
     });
     // Unmount (panel closed, thread left) must destroy the map, or every
     // open/close leaks a WebGL context plus tile-fetch listeners.
@@ -106,6 +148,7 @@ export default function MapView({ recommendation, imbl }: Props) {
       map.current?.remove();
       map.current = null;
       imblDrawn.current = false;
+      routeDrawn.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -122,6 +165,9 @@ export default function MapView({ recommendation, imbl }: Props) {
     if (!m) return;
     markers.current.forEach((marker) => marker.remove());
     markers.current = [];
+    recRef.current = recommendation;
+    clearRoute();
+    drawRoute(recommendation);
     if (!recommendation) return;
 
     const origin = recommendation.spatial_context?.origin;

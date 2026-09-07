@@ -217,6 +217,7 @@ const en = {
     legendZone: "Fishing zone",
     legendBox: "Coromandel box",
     legendBoundary: "Maritime boundary",
+    legendRoute: "Shelter route",
     readoutNoPosition: "No position in this answer",
     evidenceIntro:
       "Every figure above traces back to a tool call ORCA made. Freshness is measured against the moment of your query.",

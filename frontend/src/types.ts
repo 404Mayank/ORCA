@@ -88,6 +88,11 @@ export interface EvidenceEntry {
   error?: string | null;
 }
 
+export interface GeoPoint {
+  lat: number;
+  lon: number;
+}
+
 export interface Hypothesis {
   template: string;
   slots?: Record<string, string | number | boolean | null>;
@@ -158,6 +163,17 @@ export interface ResolvedPlace {
   source: string;
   /** tool_call_id. Required. */
   resolved_by: string;
+}
+
+export interface Route {
+  /** Shelter-leg polyline, verbatim from optimise_route(). */
+  waypoints: GeoPoint[];
+  distance_km: number;
+  estimated_hours: number;
+  /** Shelter name from nearest_landing_centre(). */
+  destination_name?: string | null;
+  /** tool_call_id of the optimise_route() call. Required. */
+  computed_by: string;
 }
 
 export interface SpatialContext {
@@ -281,6 +297,7 @@ export interface Recommendation {
   operational_guidance?: OperationalGuidance[];
   alternatives?: Alternative[];
   window?: Window | null;
+  route?: Route | null;
   spatial_context?: SpatialContext | null;
   assumptions?: Assumption[];
   confidence?: Confidence | null;

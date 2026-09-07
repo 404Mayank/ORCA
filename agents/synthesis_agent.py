@@ -38,6 +38,7 @@ from core.schemas.recommendation import (
     OperationalGuidance,
     Recommendation,
     ResolvedPlace,
+    Route,
     SpatialContext,
     Templated,
     Trajectory,
@@ -367,6 +368,7 @@ def build_recommendation(
 
     drivers = _drivers(result, risk, threshold)
     window = _build_window(result, vessel_class, threshold)
+    route = _build_route(result)
     findings = _negative_findings(result)
 
     claims: list[Claim] = []
@@ -486,6 +488,7 @@ def build_recommendation(
         negative_findings=findings,
         operational_guidance=guidance,
         window=window,
+        route=route,
         spatial_context=spatial,
         assumptions=assumptions,
         confidence=Confidence(
@@ -1185,6 +1188,33 @@ def _build_conditions(result: ExecutionResult, intent: Intent, turn_id: str) -> 
     )
 
 
+def _build_route(result: ExecutionResult) -> Route | None:
+    """The shelter-leg polyline, or None when there is nothing to draw.
+
+    Called from the safety builder only: the route exists to get a fisherman
+    somewhere to shelter on a no_go/marginal day, and no other query type
+    runs the collaboration rounds that produce it.
+
+    Reads the first OK `optimise_route` output verbatim -- waypoints already
+    arrive rounded to 4dp from the tool, and re-rounding here would produce
+    numbers the tool never emitted. A FAILED or absent output yields None
+    (the existing degraded path carries the message); never a partial
+    polyline, which would be worse than none.
+    """
+    route = _first_output(result, "optimise_route")
+    route_id = _first_call_id(result, "optimise_route")
+    if route is None or route_id is None:
+        return None
+    shelter = _first_output(result, "nearest_landing_centre")
+    return Route(
+        waypoints=list(route.waypoints),
+        distance_km=route.distance_km,
+        estimated_hours=route.estimated_hours,
+        destination_name=getattr(shelter, "name", None),
+        computed_by=route_id,
+    )
+
+
 def _first_output(result: ExecutionResult, tool_name: str):
     """The output of the first step that ran ``tool_name``, or None.
 
@@ -1192,11 +1222,15 @@ def _first_output(result: ExecutionResult, tool_name: str):
     between a hardcoded fallback plan, a composed plan and whatever the model
     emitted. Hardcoding "s3" here would work until the day a plan had one more
     geospatial step, and then it would silently read the wrong tool's output.
+
+    Skips FAILED records: a failed check produced no usable value, so the
+    first *OK* output is what every builder -- route included -- must read.
+    A FAILED-then-OK log cites the OK call; an OK-then-FAILED log keeps the OK.
     """
     for record in result.tool_call_log.values():
         if record.tool == tool_name and record.step_id:
             output = result.outputs.get(record.step_id)
-            if output is not None:
+            if output is not None and output.status is not ToolStatus.FAILED:
                 return output
     return None
 
@@ -1204,5 +1238,9 @@ def _first_output(result: ExecutionResult, tool_name: str):
 def _first_call_id(result: ExecutionResult, tool_name: str) -> str | None:
     for call_id, record in result.tool_call_log.items():
         if record.tool == tool_name:
-            return call_id
+            output = (
+                result.outputs.get(record.step_id) if record.step_id else None
+            )
+            if output is not None and output.status is not ToolStatus.FAILED:
+                return call_id
     return None

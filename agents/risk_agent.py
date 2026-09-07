@@ -26,7 +26,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.schemas.intent import Intent, QueryType
+from core import config
+from core.schemas.intent import Intent, QueryType, VesselClass
 from core.schemas.tool_io import ToolStatus
 from agents.base import Agent, AgentRequest, DomainFragment, register_agent
 from tools.registry import AgentGroup
@@ -158,9 +159,27 @@ class RiskAgent(Agent):
         This fires on the verdict, not on the query type. A calm day produces
         no request at all, which is the point: the plan is different because
         the sea is different, not because the question was phrased differently.
+
+        Shelter-leg routing wires across two collaboration rounds, inferred
+        statelessly from what already ran (collaborate re-executes the whole
+        plan each wave, so `result` holds every step so far):
+
+        * Round 1: shelter lookup (critical) plus the traversal-cost grid
+          (non-critical; it needs no endpoint so it can build alongside).
+        * Round 2: only when an OK shelter AND an OK grid are present and no
+          optimise_route has run yet, request the shelter leg with literals.
+        * A FAILED grid in round 1 implies no route request and synthesis
+          leaves `route` None -- a grid that failed to build cannot be routed
+          over, and retrying identical args would fail identically.
         """
         requests: list[AgentRequest] = []
         records = self._my_records(result)
+
+        shelter = _first_ok_output(result, "nearest_landing_centre")
+        grid = _first_ok_output(result, "route_grid")
+        grid_failed = _has_failed_record(result, "route_grid")
+        route_ran = _has_record(result, "optimise_route")
+        vessel_class = (intent.vessel_class or VesselClass.FRP_9M).value
 
         for step_id, record in records.items():
             output = result.outputs.get(step_id)
@@ -175,20 +194,64 @@ class RiskAgent(Agent):
             if place is None:
                 continue
 
-            requests.append(
-                AgentRequest(
-                    from_agent=self.name,
-                    to_agent="GeospatialAgent",
-                    tool="nearest_landing_centre",
-                    args={"lat": place[0], "lon": place[1]},
-                    reason=(
-                        f"verdict is {output.verdict}"
-                        + (f" ({output.downgrade_reason})" if output.downgrade_reason else "")
-                        + "; the answer should name somewhere to shelter"
-                    ),
-                    critical=True,
+            if shelter is None:
+                requests.append(
+                    AgentRequest(
+                        from_agent=self.name,
+                        to_agent="GeospatialAgent",
+                        tool="nearest_landing_centre",
+                        args={"lat": place[0], "lon": place[1]},
+                        reason=(
+                            f"verdict is {output.verdict}"
+                            + (f" ({output.downgrade_reason})" if output.downgrade_reason else "")
+                            + "; the answer should name somewhere to shelter"
+                        ),
+                        critical=True,
+                    )
                 )
-            )
+            if grid is None and not grid_failed:
+                west, south, east, north = config.bbox()
+                requests.append(
+                    AgentRequest(
+                        from_agent=self.name,
+                        to_agent="GeospatialAgent",
+                        tool="route_grid",
+                        args={
+                            "bbox": (west, south, east, north),
+                            "vessel_class": vessel_class,
+                            "resolution_deg": 0.05,
+                        },
+                        reason=(
+                            f"verdict is {output.verdict}; the shelter-leg route "
+                            "needs a traversal-cost grid for this vessel class"
+                        ),
+                        critical=False,
+                    )
+                )
+            if (
+                shelter is not None
+                and grid is not None
+                and not route_ran
+                and getattr(grid, "grid_ref", None)
+            ):
+                requests.append(
+                    AgentRequest(
+                        from_agent=self.name,
+                        to_agent="RiskAgent",
+                        tool="optimise_route",
+                        args={
+                            "start": {"lat": place[0], "lon": place[1]},
+                            "end": {"lat": shelter.lat, "lon": shelter.lon},
+                            "grid_ref": grid.grid_ref,
+                            "vessel_class": vessel_class,
+                        },
+                        reason=(
+                            f"verdict is {output.verdict}; the answer should draw "
+                            f"the shelter leg to {getattr(shelter, 'name', 'shelter')}"
+                        ),
+                        critical=False,
+                    )
+                )
         return requests
 
     @staticmethod
@@ -201,6 +264,34 @@ class RiskAgent(Agent):
             if output is not None and getattr(output, "lat", None) is not None:
                 return (output.lat, output.lon)
         return None
+
+
+def _first_ok_output(result, tool_name: str):
+    """First non-FAILED output for `tool_name` in log order, or None.
+
+    Mirrors the first-OK helpers in synthesis: a FAILED record is a failed
+    check, not a usable endpoint, so round-2 inference must not read it.
+    """
+    for record in result.tool_call_log.values():
+        if record.tool != tool_name or not record.step_id:
+            continue
+        output = result.outputs.get(record.step_id)
+        if output is not None and output.status is not ToolStatus.FAILED:
+            return output
+    return None
+
+
+def _has_failed_record(result, tool_name: str) -> bool:
+    """Whether any `tool_name` call ran and failed."""
+    return any(
+        record.tool == tool_name and record.status is ToolStatus.FAILED
+        for record in result.tool_call_log.values()
+    )
+
+
+def _has_record(result, tool_name: str) -> bool:
+    """Whether any `tool_name` call ran at all, whatever its status."""
+    return any(record.tool == tool_name for record in result.tool_call_log.values())
 
 
 risk_agent = register_agent(RiskAgent())

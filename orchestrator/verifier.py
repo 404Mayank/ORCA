@@ -149,6 +149,16 @@ def _find(claimed: float, haystack: Iterable[float]) -> bool:
     return any(numbers_match(claimed, v) for v in haystack)
 
 
+def _microdegrees(value: float) -> int:
+    """Integer microdegrees. Exact comparison at the tool's own precision.
+
+    The route tool emits waypoints rounded to 4dp, so scaling by 1e6 and
+    rounding to an int compares exactly -- unlike numbers_match, which
+    deliberately tolerates display rounding, and unlike round(x, 4) == y,
+    which still compares binary floats. Used only for the route check."""
+    return round(float(value) * 1_000_000)
+
+
 # --------------------------------------------------------------------------
 # The walk
 # --------------------------------------------------------------------------
@@ -197,6 +207,8 @@ def verify(
         cited.add(rec.verdict.computed_by)
     if rec.window is not None:
         cited.add(rec.window.basis)
+    if rec.route is not None:
+        cited.add(rec.route.computed_by)
 
     for ref in sorted(cited):
         if ref not in log:
@@ -249,6 +261,23 @@ def verify(
                 f"asserts an absence, but {nf.checked_by} failed "
                 f"({record.error!r}). Not knowing is not the same as nothing "
                 "being there.",
+            )
+
+    # -- 3b. a route must rest on a call that succeeded -------------------
+    if rec.route is not None:
+        record = log.get(rec.route.computed_by)
+        if record is None or record.status is ToolStatus.FAILED:
+            add(
+                Severity.ERROR,
+                "route_from_failed_call",
+                "route.computed_by",
+                f"cites {rec.route.computed_by}, which "
+                + (
+                    "never ran. A route may only be drawn from a call that ran."
+                    if record is None
+                    else f"failed ({record.error!r}). A route from a failed "
+                    "optimisation is not a route."
+                ),
             )
 
     # -- 4. claims: the core walk ------------------------------------------
@@ -364,6 +393,71 @@ def verify(
                 "its test failed, so the hypothesis is untested and must be "
                 "dropped rather than reported.",
             )
+
+    # -- 10. the route: structured waypoint comparison, not the haystack -
+    #
+    # Waypoints are NOT checked with numbers_match/_find. The flat haystack
+    # (provenance.flatten_numbers, via ToolCallLog.record) mixes waypoint
+    # latitudes with distance_km/estimated_hours, so a flat _find could match
+    # a claimed latitude against a distance that happens to share its digits.
+    # Structured pairwise comparison against the cited call's output list
+    # removes that cross-match class entirely: same count, same order, exact
+    # equality at integer microdegrees (the tool already emits 4dp, so 1e-6
+    # integer comparison is exact, with no float-repr tolerance window).
+    #
+    # Residual risk, stated honestly: this proves *provenance* -- the drawn
+    # points are the tool's points -- not geodetic truth. The tool's own
+    # rounding is trusted because the tool is the authority here.
+    if rec.route is not None:
+        record = log.get(rec.route.computed_by)
+        if record is not None and record.status is not ToolStatus.FAILED:
+            for value, name in (
+                (rec.route.distance_km, "route.distance_km"),
+                (rec.route.estimated_hours, "route.estimated_hours"),
+            ):
+                numbers_checked += 1
+                if not _find(value, record.output_numbers):
+                    add(
+                        Severity.ERROR,
+                        "unsupported_number",
+                        name,
+                        f"asserts {value} but {rec.route.computed_by} returned no "
+                        "value that rounds to it.",
+                    )
+            raw = (record.output or {}).get("waypoints")
+            claimed = rec.route.waypoints
+            if not isinstance(raw, list) or len(raw) != len(claimed):
+                numbers_checked += 1
+                got = len(raw) if isinstance(raw, list) else "non-list"
+                add(
+                    Severity.ERROR,
+                    "route_waypoint_mismatch",
+                    "route.waypoints",
+                    f"route carries {len(claimed)} waypoints but the cited call "
+                    f"{rec.route.computed_by} holds {got}. Count must match "
+                    "exactly; a drawn point with no tool point is invented.",
+                )
+            else:
+                for index, (point, ref) in enumerate(zip(claimed, raw)):
+                    numbers_checked += 2
+                    ref_lat = ref.get("lat") if isinstance(ref, dict) else None
+                    ref_lon = ref.get("lon") if isinstance(ref, dict) else None
+                    if (
+                        not isinstance(ref_lat, (int, float))
+                        or not isinstance(ref_lon, (int, float))
+                        or isinstance(ref_lat, bool)
+                        or isinstance(ref_lon, bool)
+                        or _microdegrees(point.lat) != _microdegrees(ref_lat)
+                        or _microdegrees(point.lon) != _microdegrees(ref_lon)
+                    ):
+                        add(
+                            Severity.ERROR,
+                            "route_waypoint_mismatch",
+                            f"route.waypoints[{index}]",
+                            f"drawn as ({point.lat}, {point.lon}) but the cited "
+                            f"call holds ({ref_lat}, {ref_lon}). Coordinates come "
+                            "from the tool output verbatim, never from the model.",
+                        )
 
     errors = [v for v in violations if v.severity is Severity.ERROR]
     return VerificationReport(
