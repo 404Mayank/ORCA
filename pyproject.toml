@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # (config/ holds yaml, db/ holds migrations, scripts/ uses a sys.path hack,
 # frontend/ is not Python). Keep in sync when adding a package.
 [tool.setuptools]
-packages = ["agents", "alerts", "core", "fixtures", "ingest", "language", "orchestrator", "tests", "tools"]
+packages = ["agents", "alerts", "core", "fixtures", "ingest", "language", "orchestrator", "rag", "tests", "tools"]
 
 [project]
 name = "orca"

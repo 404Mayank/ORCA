@@ -220,12 +220,17 @@ def _evidence_summary(result: "ExecutionResult") -> str:
     return json.dumps({"tools_run": sorted(set(lines))}, indent=1)
 
 
-def propose(result: "ExecutionResult", place: str | None) -> tuple[list[Proposal], str | None]:
+def propose(result: "ExecutionResult", place: str | None, background: list[str] | None = None) -> tuple[list[Proposal], str | None]:
     """Ask the model for explanations, then test each one.
 
     Returns ``(proposals, error)``. A proposal is only returned if a real test
     ran and produced an outcome; anything else is dropped silently, which is
     the behaviour CLAUDE.md requires.
+
+    ``background`` is wording-only context (retrieved explainer notes, already
+    number-stripped by rag/store.py). It may influence WHICH tests the model
+    proposes and how it words them; it cannot create a new test, change an
+    outcome, or reach a claim -- the TESTS gate below is unchanged.
     """
     if not PROMPT_PATH.exists():
         return [], "no causal prompt"
@@ -235,6 +240,14 @@ def propose(result: "ExecutionResult", place: str | None) -> tuple[list[Proposal
         f"What ran this turn:\n{_evidence_summary(result)}\n\n"
         "Propose the explanations worth testing here."
     )
+    if background:
+        # Wording only, and the gate below still drops anything untestable.
+        # A retrieved note can suggest an angle; it cannot vote on the answer.
+        notes = "\n".join(f"- {note[:300]}" for note in background[:3])
+        user += (
+            "\n\nBackground reading (context only, no numbers; every "
+            "explanation must still name one of the tests above):\n" + notes
+        )
     completion = llm.complete("deliberator", _prompt(result), user)
     if not completion.ok:
         return [], completion.error or "llm unavailable"

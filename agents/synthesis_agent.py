@@ -49,6 +49,7 @@ from core.schemas.recommendation import (
 )
 from core.schemas.tool_io import ToolStatus
 from orchestrator.executor import ExecutionResult
+from rag.store import background_for_causal
 
 __all__ = ["build_recommendation", "KM_PER_KNOT_HOUR"]
 
@@ -991,7 +992,13 @@ def _build_causal(result: ExecutionResult, intent: Intent, turn_id: str) -> Reco
     # been through a real test in agents/hypotheses.py, and a proposal naming a
     # test we do not have never arrives here at all.
     proposed, proposal_error = propose_hypotheses(
-        result, intent.spatial_reference.name if intent.spatial_reference else None
+        result, intent.spatial_reference.name if intent.spatial_reference else None,
+        # Explainer wording only (number-stripped in rag/store.py, [] when the
+        # store is unconfigured). The TESTS gate inside propose() is unchanged:
+        # background can suggest an angle, never an outcome.
+        background=background_for_causal(
+            intent.spatial_reference.name if intent.spatial_reference else None
+        ),
     )
     known = {h.id for h in hypotheses}
     for proposal in proposed:
