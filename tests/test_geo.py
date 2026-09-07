@@ -273,7 +273,7 @@ def test_resolve_place_never_claims_full_confidence():
     landing centre register. Nothing downstream may mistake one for the other."""
     out = resolve_place(ResolvePlaceIn(name="Nagapattinam"))
     assert out.match_confidence < 1.0
-    assert out.provenance.source == "bbox.yaml#reference_points"
+    assert out.provenance.source == "bbox-seed"
     assert "provisional" in out.provenance.authority.lower()
 
 
