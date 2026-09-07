@@ -2,7 +2,111 @@
 
 Living status document. Updated as work lands, not as it is planned.
 
-**Last updated:** 2026-09-07 · **Tests:** 380 passing, 15 skipped, 0 failed (venv, weather+alert cache, hermetic) · **Head:** Phase 4 + streams 0-4, 6 · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
+**Last updated:** 2026-09-07 · **Tests:** 386 passing, 15 skipped, 0 failed (venv, weather+alert cache, hermetic) · **Head:** Phase 4 + streams 0-4, 6 + UI reskin + /settings · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
+
+---
+
+## What landed on 2026-09-07 (later) — UI reskin + real settings endpoint
+
+Frontend rebuilt around the `ORCAui` hydrographic-chart reference (light
+sea-glass default, dark abyss toggle, Newsreader/Archivo/Plex Mono, rail +
+topbar + bridge/thread + side panel), re-grounded to OUR coast: Coromandel
+box, Nagapattinam/Cuddalore/Rameswaram copy, IMBL+MPA honesty. Mock-only
+fixtures (Mangaluru, AIS counts, lightning radar, account/upgrade, random
+sounding numbers, selectable model menu) were cut or replaced with live
+backends; the verdict banner, `✓ N verified` meta, options, collaboration,
+and evidence trail are new UI surfaces for existing API fields.
+
+- **All UI copy in `frontend/src/i18n/strings.ts`.** One object, `fill()`
+  slot helper mirroring claim templates. Tamil later is a second object +
+  a switch -- the same one-adapter shape as the backend language stub.
+- **Rail is all-real:** Bridge, New query, Conversations (GET
+  `/session/{id}` + localStorage recents), Saved zones (localStorage,
+  keeps the recommendation so evidence/map reopen), Alerts (badge = real
+  `in_force` count, `!` while unchecked), Settings.
+- **Settings sheet, all knobs live:** tier Free/Fast/Paid via new
+  `GET/POST /settings` (runtime override, next question uses it, `null`
+  returns authority to `ORCA_TIER`; 5 tests in `tests/test_settings.py`),
+  Light/Dark (localStorage, default light), English + disabled Tamil row,
+  data status from `/readiness` layers.
+- 4th task card is **Sea conditions** (fishermen check it daily;
+  `causal_explain` lives in chips+suggestions, safest-route inside safety
+  answers). Map stays MapLibre with real geometry; readout shows only
+  `spatial_context` coords, never cursor-depth fiction.
+- Mobile from the start: 1120/1000/820 breakpoints, icon rail, scrollable
+  chips, scrollable tables, `tsc -b` + `vite build` green.
+- Not visually verified in a browser here -- fonts and OSM tiles need
+  network at runtime like before.
+
+## What landed on 2026-09-07 (later) — honesty batch, mobile shell, screenshot harness
+
+Two-agent UI audit (flow recon + gap critiquer) returned real findings;
+the honest-and-crash batch is built, verified with headless screenshots
+(Playwright/Chromium via `/tmp/pw` venv, `/tmp/shot.py`; Firefox headless
+can't wait for JS). Desktop + 390px shots read clean, zero console errors.
+
+- **Stale side panel fixed:** turns with no recommendation (or no origin)
+  close the panel instead of framing the previous answer's map/evidence.
+- **Boundaries everywhere it matters:** side panel wrapped (Sheets
+  already was); MapView removes the map on unmount (was leaking a WebGL
+  context per open/close).
+- **Busy affordances:** bridge cards/chips and answer options dim and
+  hold while a question flies; mid-flight New query invalidates the stale
+  response by request id; `DELETE /session` is actually called on session
+  rotate; API errors go to the console, the user gets one sentence.
+- **Copy honesty:** feed pill says "weather cached/missing" (ready gates
+  on weather only), evidence footer no longer claims failed answers are
+  never shown, alerts count is all advisories not cyclones, tier drops the
+  "3 s" timing claim.
+- **Dead code deleted:** `isSaved`, Composer `initial`, unreferenced
+  string keys and CSS confirmed by grep.
+- **Mobile shell:** hamburger drawer rail under 820px, sticky
+  screen-bottom thread composer, compact fading chips, two-row topbar,
+  bridge kbd hint hidden on phones. Verified at 390×844.
+- **Still open from the audit (not built):** `visual_layers` geometry on
+  the map, clarification/refusal/window rendering, promise-driven boot,
+  `missing_slots`/fallback-plan surfacing, sheet focus trap + Escape.
+
+## What landed on 2026-09-07 (later) — worker knob batch + UI surfacing
+
+A worker (`general.worker`, tight file allowlist, backend only) added 7
+runtime knobs on the override pattern: context/pending TTLs, max rounds
++ added steps, template fallback, LLM + step timeouts. 12 tests pass in
+`tests/test_settings.py`, ruff shows only the 6 pre-existing hits
+(verified identical at HEAD). I reviewed the diff, restarted the API,
+and surfaced the three user-meaningful knobs in the sheet (memory
+presets, safety-net toggle, follow-up checks) with preset buttons so no
+422 is reachable from the UI. Round-trip + 422 verified live;
+settings-sheet screenshot verified. Pending/added-steps/LLM/step
+timeouts are API-live but UI-unsurfaced by choice (operator-grade).
+
+## What landed on 2026-09-07 (later) — subagent-diagnosed settings rows
+
+A vision subagent (explorer.logic on muse-spark-1.3-contributor; the
+default deepseek child has no vision) read a settings screenshot and
+traced four defects to `Sheets.tsx:280-285`: stray leading `·` on the
+alerts row (separator rendered with no preceding fragment), empty
+sub-lines on uncached ocean rows, raw backend keys as labels, 2dp ages.
+Fixed as one joined sub-line rendered only when non-empty, i18n labels
+with raw-key fallback, render-side rounding. DOM + screenshot verified.
+Spelling tiebreaker settled: backend sends `chlorophyll` correctly.
+
+Ops note, twice bitten: vite dev serves a poisoned transform after
+mid-edit HMR ("does not provide an export named 'default'" with a clean
+`tsc`). Fix is `pkill -9 -f "[b]in/vite"` (brackets keep pkill from
+matching its own command line) and restart with `--force`. Never bare
+`pkill -f` a pattern that appears in the invoking command.
+
+## What landed on 2026-09-07 (later) — deliberation toggle + busy honesty
+
+Chips "only work once" because answers take so long users bail
+mid-flight while `busy` swallows clicks. Two fixes: the bridge now shows
+a live status line while an answer flies, and agents' LLM fan-out can be
+switched off. `POST /settings {deliberating:false}` sets a process-local
+override (same pattern as the tier switch; restart returns to on) gated
+next to the existing `deliberating` flag, so rule-only answers stay
+correct. 3 new tests in `tests/test_settings.py` (11 total there); ruff
+clean; endpoint verified live including round-trip.
 
 ---
 

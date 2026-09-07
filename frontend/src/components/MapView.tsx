@@ -71,6 +71,14 @@ export default function MapView({ recommendation }: Props) {
         paint: { "line-color": "#4a9eff", "line-width": 1.5, "line-dasharray": [3, 3] },
       });
     });
+    // Unmount (panel closed, thread left) must destroy the map, or every
+    // open/close leaks a WebGL context plus tile-fetch listeners.
+    return () => {
+      markers.current.forEach((marker) => marker.remove());
+      markers.current = [];
+      map.current?.remove();
+      map.current = null;
+    };
   }, []);
 
   useEffect(() => {

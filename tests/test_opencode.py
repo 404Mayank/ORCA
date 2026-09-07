@@ -173,13 +173,13 @@ def test_late_401_walks_on(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", _mixed)
     result = client._complete_opencode_go("planner", "sys", "user")
     # Go chain: paid 1.3 ok? No -- scripted 429 then 401 then... third call
-    # returns a responses payload for deepseek (wrong transport) -> shape
-    # error, then glm ok. Assert the walk, not the shortcut.
+    # (glm) returns a responses payload on a chat-transport id -> shape
+    # error, then deepseek ok. Assert the walk, not the shortcut.
     assert calls[0] == "muse-spark-1.3-contributor"
-    assert result.ok and result.model == "glm-5.3-flash"
+    assert result.ok and result.model == "deepseek-v4-flash"
     assert calls == [
         "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
-        "deepseek-v4-flash", "glm-5.3-flash",
+        "glm-5.3-flash", "deepseek-v4-flash",
     ]
 
 
@@ -205,11 +205,13 @@ def test_go_paid_contributors_ride_responses(monkeypatch):
     assert "input" in script.bodies()[0] and "messages" not in script.bodies()[0]
 
 
-def test_go_chain_ends_on_glm(monkeypatch):
+def test_go_chain_prefers_glm_over_deepseek(monkeypatch):
+    # Owner lineup 2026-09-07: glm walks before deepseek. Two 429s, glm
+    # answers third, deepseek is never called.
     _env_off(monkeypatch)
     monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
     script = _Script(
-        _http_error(429), _http_error(429), _http_error(429),
+        _http_error(429), _http_error(429),
         _chat_payload("via glm"),
     )
     monkeypatch.setattr("urllib.request.urlopen", script)
@@ -217,10 +219,10 @@ def test_go_chain_ends_on_glm(monkeypatch):
     assert result.ok and result.model == "glm-5.3-flash"
     assert [b["model"] for b in script.bodies()] == [
         "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
-        "deepseek-v4-flash", "glm-5.3-flash",
+        "glm-5.3-flash",
     ]
     assert script.urls()[:2] == ["https://opencode.ai/zen/go/v1/responses"] * 2
-    assert script.urls()[2:] == ["https://opencode.ai/zen/go/v1/chat/completions"] * 2
+    assert script.urls()[2:] == ["https://opencode.ai/zen/go/v1/chat/completions"]
 
 
 def test_empty_responses_run_is_failure():
@@ -240,7 +242,7 @@ def test_chains_and_roles_configured():
     go = config.load_yaml("models.yaml")["opencode-go"]
     assert go["models"] == [
         "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
-        "deepseek-v4-flash", "glm-5.3-flash",
+        "glm-5.3-flash", "deepseek-v4-flash",
     ]
     order = config.load_yaml("models.yaml")["provider_order"]
     assert order.index("opencode") < order.index("opencode-go") < order.index("groq")
@@ -277,15 +279,18 @@ def test_fast_tier_leads_with_grok_on_go(monkeypatch):
     assert script.urls() == ["https://opencode.ai/zen/go/v1/responses"]
 
 
-def test_paid_tier_leads_with_kimi_k3(monkeypatch):
+def test_paid_tier_leads_with_spark_contributor(monkeypatch):
+    # Owner lineup 2026-09-07: paid tier opens on the Spark contributors
+    # over /responses (kimi-k3 chain it replaced is kept as a documented
+    # substitute in models.yaml, not as the live order).
     _env_off(monkeypatch)
     monkeypatch.setenv("ORCA_TIER", "paid")
     monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
-    script = _Script(_chat_payload("via kimi"))
+    script = _Script(_responses_payload("via spark"))
     monkeypatch.setattr("urllib.request.urlopen", script)
     result = client.complete("planner", "sys", "user")
-    assert result.ok and result.model == "kimi-k3"
-    assert script.urls() == ["https://opencode.ai/zen/go/v1/chat/completions"]
+    assert result.ok and result.model == "muse-spark-1.3-contributor"
+    assert script.urls() == ["https://opencode.ai/zen/go/v1/responses"]
 
 
 def test_free_tier_unchanged_without_env(monkeypatch):

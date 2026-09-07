@@ -44,11 +44,38 @@ from core.schemas.recommendation import ReasoningStep
 from core.schemas.tool_io import ToolCallRecord, ToolOutput, ToolStatus
 from tools import registry
 
-__all__ = ["ExecutionResult", "execute_plan", "execute_plan_sync"]
+__all__ = [
+    "ExecutionResult",
+    "default_timeout_s",
+    "execute_plan",
+    "execute_plan_sync",
+    "set_default_timeout_s",
+]
 
 #: Per-step ceiling when the plan does not set one. Generous enough for a cold
 #: cache read, tight enough that one wedged step cannot eat a demo.
 DEFAULT_TIMEOUT_S = 20.0
+
+# Runtime override set by POST /settings. None means the compiled default
+# above wins. Same pattern as the tier override in
+# orchestrator/llm/client.py: a process restart always returns to 20 s.
+# Only the default is overridable -- a plan step carrying its own timeout_s
+# keeps precedence, as before.
+_STEP_TIMEOUT_OVERRIDE: float | None = None
+
+
+def default_timeout_s() -> float:
+    """Effective per-step ceiling default. Override wins; default 20."""
+    if _STEP_TIMEOUT_OVERRIDE is not None:
+        return _STEP_TIMEOUT_OVERRIDE
+    return float(DEFAULT_TIMEOUT_S)
+
+
+def set_default_timeout_s(value: float | None) -> float:
+    """Set or clear the step-timeout override. Returns the effective value."""
+    global _STEP_TIMEOUT_OVERRIDE
+    _STEP_TIMEOUT_OVERRIDE = value
+    return default_timeout_s()
 
 
 @dataclass
@@ -132,7 +159,7 @@ async def _run_step(step, outputs: dict[str, ToolOutput], log: ToolCallLog):
         )
         return step, None, record
 
-    timeout = step.timeout_s or DEFAULT_TIMEOUT_S
+    timeout = step.timeout_s or default_timeout_s()
     try:
         # Tools are ordinary synchronous functions -- they do file and CPU work,
         # never network, since a query must not touch the network. A thread
