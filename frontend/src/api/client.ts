@@ -119,6 +119,22 @@ export async function setMaxRounds(max_rounds: number): Promise<TierSettings> {
   return postSettings({ max_rounds });
 }
 
+/** Return the eight tuned knobs to compiled defaults. Tier untouched. */
+export async function resetKnobs(): Promise<TierSettings> {
+  return postSettings({
+    reset: [
+      "deliberating",
+      "context_ttl_min",
+      "pending_ttl_min",
+      "max_rounds",
+      "max_added_steps",
+      "template_fallback",
+      "llm_timeout_s",
+      "step_timeout_s",
+    ],
+  });
+}
+
 export class StreamFailed extends Error {
   constructor(message = "stream failed") {
     super(message);

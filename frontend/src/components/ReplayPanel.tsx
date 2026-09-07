@@ -179,6 +179,7 @@ export default function ReplayPanel({ onClose }: Props) {
                         <th scope="col">{t.cols.time}</th>
                         <th scope="col">{t.cols.wave}</th>
                         <th scope="col">{t.cols.gust}</th>
+                        <th scope="col">{t.cols.vis}</th>
                         <th scope="col">{t.cols.score}</th>
                         <th scope="col">{t.cols.verdict}</th>
                         <th scope="col">{t.cols.why}</th>
@@ -190,6 +191,7 @@ export default function ReplayPanel({ onClose }: Props) {
                           <td className="mono">{shortTime(row.at)}</td>
                           <td className="mono">{row.wave_m ?? "—"}</td>
                           <td className="mono">{row.gust_kn ?? "—"}</td>
+                          <td className="mono">{row.vis_km ?? "—"}</td>
                           <td className="mono">
                             {typeof row.score === "number" ? row.score.toFixed(3) : "—"}
                           </td>

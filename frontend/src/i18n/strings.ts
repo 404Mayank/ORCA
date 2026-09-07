@@ -274,6 +274,8 @@ const en = {
       } as Record<string, { name: string; desc: string }>,
       useEnv: "Follow .env",
       useEnvSub: "Return authority to ORCA_TIER",
+      resetAll: "Reset tuned knobs",
+      resetAllSub: "Back to compiled defaults (reasoning, memory, checks, timeouts). Tier untouched.",
       reasoningHeading: "Agent reasoning",
       reasoningSub:
         "When off, agents skip the extra thinking pass and follow fixed rules only. Faster, but they won't ask for follow-up checks on their own.",
@@ -351,6 +353,7 @@ const en = {
       time: "Time",
       wave: "Wave m",
       gust: "Gust kn",
+      vis: "Vis km",
       score: "Score",
       verdict: "Verdict",
       why: "Why",

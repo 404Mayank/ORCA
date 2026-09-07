@@ -37,11 +37,14 @@ interface Props {
   onSetContextTtl: (minutes: number) => void;
   onSetTemplateFallback: (value: boolean) => void;
   onSetMaxRounds: (rounds: number) => void;
+  onResetKnobs: () => void;
   theme: Theme;
   onSetTheme: (theme: Theme) => void;
   layers: Record<string, LayerStatus>;
   /** Backend recovery hint (e.g. empty-cache fix). Shown verbatim. */
   hint: string | null;
+  /** aria-label of the opener to refocus on unmount. Null = leave focus. */
+  returnFocusLabel: string | null;
 }
 
 const fmtTime = (iso: string) => {
@@ -58,8 +61,21 @@ export const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export default function Sheets(props: Props) {
-  const { sheet, onClose } = props;
+  const { sheet, onClose, returnFocusLabel } = props;
   const sh = str.sheets;
+
+  // Return focus to the opener on unmount. Best-effort: a missing label
+  // simply leaves focus where the trap last held it (inside, then body).
+  useEffect(() => {
+    return () => {
+      if (!returnFocusLabel) return;
+      const opener = document.querySelector<HTMLElement>(
+        `[aria-label="${returnFocusLabel}"]`,
+      );
+      opener?.focus({ preventScroll: true });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const sheetRef = useRef<HTMLElement | null>(null);
 
   // Focus in on open; Tab cycles inside while open; Escape closes.
@@ -252,7 +268,7 @@ function AlertsPane({ alerts, onAskAlerts }: Props) {
 const MEMORY_PRESETS = [30, 90, 180];
 const ROUNDS_PRESETS = [0, 1, 2];
 
-function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, onSetContextTtl, onSetTemplateFallback, onSetMaxRounds, theme, onSetTheme, layers, hint }: Props) {
+function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, onSetContextTtl, onSetTemplateFallback, onSetMaxRounds, onResetKnobs, theme, onSetTheme, layers, hint }: Props) {
   const c = str.sheets.settings;
   const tierCopy = c.tiers;
   return (
@@ -352,6 +368,17 @@ function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, on
             <b>{rounds === 0 ? c.roundsNone : rounds === 1 ? c.roundsOne : fill(c.roundsMany, { n: rounds })}</b>
           </button>
         ))}
+      </div>
+
+      <div style={{ padding: "0 8px 6px" }}>
+        <button
+          className="tier-pick"
+          disabled={settingsBusy || settings == null}
+          onClick={() => onResetKnobs()}
+        >
+          <b>{c.resetAll}</b>
+          <small>{c.resetAllSub}</small>
+        </button>
       </div>
 
       <div className="ev-sec">{c.appearanceHeading}</div>

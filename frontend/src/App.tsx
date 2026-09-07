@@ -7,6 +7,7 @@ import {
   getSettings,
   StreamFailed,
   newSessionId,
+  resetKnobs,
   setContextTtl,
   setDeliberating,
   setMaxRounds,
@@ -80,6 +81,7 @@ export default function App() {
   const [view, setView] = useState<"bridge" | "thread">("bridge");
   const [railOpen, setRailOpen] = useState(false);
   const [sheet, setSheet] = useState<SheetKey | null>(null);
+  const [sheetReturnFocus, setSheetReturnFocus] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Readiness | null>(null);
@@ -286,6 +288,13 @@ export default function App() {
 
   function onRail(key: RailKey) {
     setRailOpen(false);
+    setSheetReturnFocus(
+      key === "conversations" ? str.rail.conversations.label
+      : key === "saved" ? str.rail.saved.label
+      : key === "alerts" ? str.rail.alerts.label
+      : key === "settings" ? str.rail.settings.label
+      : null,
+    );
     if (key === "bridge") {
       setSheet(null);
       setReplayOpen(false);
@@ -454,7 +463,10 @@ export default function App() {
             feed={feedState}
             busy={busy}
             onSend={(text) => void send(text, { fresh: true })}
-            onOpenSettings={() => void openSheet("settings")}
+            onOpenSettings={() => {
+              setSheetReturnFocus(str.rail.settings.label);
+              void openSheet("settings");
+            }}
             onMenu={() => setRailOpen(true)}
             onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
           />
@@ -660,6 +672,8 @@ export default function App() {
             onSetContextTtl={(m) => void changeSetting(() => setContextTtl(m))}
             onSetTemplateFallback={(v) => void changeSetting(() => setTemplateFallback(v))}
             onSetMaxRounds={(r) => void changeSetting(() => setMaxRounds(r))}
+            onResetKnobs={() => void changeSetting(() => resetKnobs())}
+            returnFocusLabel={sheetReturnFocus}
             hint={status?.hint ?? null}
             theme={theme}
             onSetTheme={(t) => setTheme(t)}
