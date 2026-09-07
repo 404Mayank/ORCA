@@ -63,7 +63,13 @@ from orchestrator.validate_plan import validate_plan
 __all__ = [
     "MAX_ROUNDS",
     "CollaborationResult",
+    "deliberating_enabled",
+    "max_added_steps",
+    "max_rounds",
     "run_with_collaboration",
+    "set_deliberating",
+    "set_max_added_steps",
+    "set_max_rounds",
 ]
 
 #: Review passes after the first execution.
@@ -73,6 +79,60 @@ MAX_ROUNDS = 2
 #: ``Plan`` caps the total at 12; this keeps agents from consuming the whole
 #: budget and leaving no room for a replan.
 MAX_ADDED_STEPS = 4
+
+# Runtime overrides set by POST /settings. None means the compiled defaults
+# above win. Same pattern as the deliberation override in this module: a
+# process restart always returns to the defaults.
+_MAX_ROUNDS_OVERRIDE: int | None = None
+_MAX_ADDED_STEPS_OVERRIDE: int | None = None
+
+
+def max_rounds() -> int:
+    """Effective collaboration rounds. Override wins; default 2."""
+    if _MAX_ROUNDS_OVERRIDE is not None:
+        return _MAX_ROUNDS_OVERRIDE
+    return MAX_ROUNDS
+
+
+def set_max_rounds(value: int | None) -> int:
+    """Set or clear the max-rounds override. Returns the effective value."""
+    global _MAX_ROUNDS_OVERRIDE
+    _MAX_ROUNDS_OVERRIDE = value
+    return max_rounds()
+
+
+def max_added_steps() -> int:
+    """Effective added-steps budget. Override wins; default 4."""
+    if _MAX_ADDED_STEPS_OVERRIDE is not None:
+        return _MAX_ADDED_STEPS_OVERRIDE
+    return MAX_ADDED_STEPS
+
+
+def set_max_added_steps(value: int | None) -> int:
+    """Set or clear the added-steps override. Returns the effective value."""
+    global _MAX_ADDED_STEPS_OVERRIDE
+    _MAX_ADDED_STEPS_OVERRIDE = value
+    return max_added_steps()
+
+# Runtime override set by POST /settings. None means the default (on).
+# Same pattern as the tier override in orchestrator/llm/client.py: a process
+# restart always returns to the default. Off skips the per-agent LLM fan-out
+# and runs the rule floor alone -- faster, fewer follow-up checks.
+_DELIBERATING_OVERRIDE: bool | None = None
+
+
+def deliberating_enabled() -> bool:
+    """Whether agents deliberate this turn. Override wins; default True."""
+    if _DELIBERATING_OVERRIDE is not None:
+        return _DELIBERATING_OVERRIDE
+    return True
+
+
+def set_deliberating(value: bool | None) -> bool:
+    """Set or clear the deliberation override. Returns the effective value."""
+    global _DELIBERATING_OVERRIDE
+    _DELIBERATING_OVERRIDE = value
+    return deliberating_enabled()
 
 
 @dataclass
@@ -257,7 +317,7 @@ def run_with_collaboration(
     # Deliberation runs in round one only. A second LLM pass over results the
     # agent has already reasoned about produces restatements, not new
     # questions, and costs a call per agent to do it.
-    for round_number in range(1, MAX_ROUNDS + 1):
+    for round_number in range(1, max_rounds() + 1):
         seen = _existing_signatures(raw["steps"])
         requests: list[AgentRequest] = []
         pending: list = []  # agents to deliberate this round (round 1 only)
@@ -291,7 +351,13 @@ def run_with_collaboration(
             # rule floor above still runs; only the LLM fan-out is skipped.
             # Deliberating agents lose their `assessed:` trace lines on these
             # turns; that is the trade, stated here rather than discovered.
-            if deliberating and round_number == 1 and ran_something and intent.query_type is not QueryType.CONDITIONS_REPORT:
+            if (
+                deliberating
+                and deliberating_enabled()
+                and round_number == 1
+                and ran_something
+                and intent.query_type is not QueryType.CONDITIONS_REPORT
+            ):
                 pending.append(agent)
 
         # The fan-out: concurrent deliberation, merged back in agent order.
@@ -315,7 +381,7 @@ def run_with_collaboration(
         for request in requests:
             if request.signature in seen:
                 continue  # already planned, or asked for last round
-            if added + len(accepted) >= MAX_ADDED_STEPS:
+            if added + len(accepted) >= max_added_steps():
                 outcome.dropped.append(
                     f"{request.describe()} [step budget reached]"
                 )

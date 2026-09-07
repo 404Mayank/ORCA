@@ -1,8 +1,44 @@
 import { useEffect, useRef, useState } from "react";
-import { ask, newSessionId, readiness, type Readiness } from "./api/client";
+import {
+  ask,
+  forgetSession,
+  getSettings,
+  newSessionId,
+  setContextTtl,
+  setDeliberating,
+  setMaxRounds,
+  setTemplateFallback,
+  readiness,
+  sessionHistory,
+  setTier,
+  type Readiness,
+  type SessionTurn,
+  type TierSettings,
+} from "./api/client";
 import type { ChatResponse, Recommendation } from "./types";
-import MapView from "./components/MapView";
-import EvidenceDrawer from "./components/EvidenceDrawer";
+import AnswerView from "./components/AnswerView";
+import Bridge from "./components/Bridge";
+import ErrorBoundary from "./components/ErrorBoundary";
+import Composer from "./components/Composer";
+import EvidencePane from "./components/EvidencePane";
+import Rail, { type RailKey } from "./components/Rail";
+import SectorMap from "./components/SectorMap";
+import Sheets, { type SheetKey } from "./components/Sheets";
+import type { FeedState } from "./components/Topbar";
+import { BackIcon, DocIcon, MapIcon, MenuIcon } from "./components/icons";
+import { fill, str } from "./i18n/strings";
+import {
+  applyTheme,
+  loadRecents,
+  loadSaved,
+  loadTheme,
+  pushRecent,
+  removeSaved,
+  saveAnswer,
+  type RecentQuery,
+  type SavedAnswer,
+  type Theme,
+} from "./storage";
 
 interface Message {
   role: "user" | "bot";
@@ -10,90 +46,316 @@ interface Message {
   response?: ChatResponse;
 }
 
-const SAMPLES = [
-  "Is it safe to take my FRP boat out from Nagapattinam tomorrow morning?",
-  "Where is the nearest fishing zone from Rameswaram for my trawler?",
-  "Which zones must I avoid near Rameswaram?",
-  "Why has my catch declined off Cuddalore?",
-];
+function asRecommendation(value: unknown): Recommendation | null {
+  // LocalStorage entries survive schema bumps, so a name-only check is not
+  // enough: a stale saved object with a string lat would crash SectorMap.
+  // Anything failing this check renders as plain prose, never as a chart.
+  if (value && typeof value === "object") {
+    const v = value as Record<string, unknown>;
+    if (typeof v.query_type === "string" && v.query_type.length > 0) {
+      return value as Recommendation;
+    }
+  }
+  return null;
+}
+
+function validOrigin(origin: { lat: unknown; lon: unknown } | null | undefined): boolean {
+  return (
+    !!origin &&
+    typeof origin.lat === "number" &&
+    Number.isFinite(origin.lat) &&
+    typeof origin.lon === "number" &&
+    Number.isFinite(origin.lon)
+  );
+}
 
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(() => loadTheme());
+  const [view, setView] = useState<"bridge" | "thread">("bridge");
+  const [railOpen, setRailOpen] = useState(false);
+  const [sheet, setSheet] = useState<SheetKey | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Readiness | null>(null);
+  const [settings, setSettings] = useState<TierSettings | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [panel, setPanel] = useState<"map" | "evidence" | null>(null);
   const [drawer, setDrawer] = useState<Recommendation | null>(null);
   const [mapFor, setMapFor] = useState<Recommendation | null>(null);
-  // Which side panel is showing, if any. The map used to hold the middle of
-  // the screen permanently, which spent the largest area on a basemap that is
-  // only meaningful once an answer has a position in it.
-  const [panel, setPanel] = useState<"map" | "evidence" | null>(null);
-  const sessionId = useRef(newSessionId());
-  const feed = useRef<HTMLDivElement>(null);
+  const [turns, setTurns] = useState<SessionTurn[]>([]);
+  const [recents, setRecents] = useState<RecentQuery[]>(() => loadRecents());
+  const [saved, setSaved] = useState<SavedAnswer[]>(() => loadSaved());
 
-  // The boot screen is not decoration: it runs the real /readiness check and
-  // reports which cache layers answered. An empty cache is the single most
-  // likely reason a demo fails, and this is where it becomes visible -- before
-  // the first question rather than in its answer.
+  const sessionId = useRef(newSessionId());
+  // Monotonic send id: a "New query" issued while a question is flying
+  // invalidates the in-flight response so it can't append to the fresh
+  // transcript or wedge `busy` on.
+  const reqId = useRef(0);
+  const feed = useRef<HTMLDivElement>(null);
   const [boot, setBoot] = useState<{ pct: number; label: string } | null>({
     pct: 0,
-    label: "linking",
+    label: str.boot.steps[0],
   });
 
   useEffect(() => {
-    const steps = ["linking", "reading cache", "checking alerts", "ready"];
+    applyTheme(theme);
+  }, [theme]);
+
+  // Boot runs the real checks: cache readiness and tier state. An empty
+  // cache is the likeliest demo failure, and this is where it surfaces --
+  // before the first question, not inside its answer.
+  useEffect(() => {
+    const steps = str.boot.steps;
     let i = 0;
     const tick = setInterval(() => {
       i += 1;
-      setBoot({ pct: Math.min(100, i * 26), label: steps[Math.min(i, 3)] });
+      setBoot({ pct: Math.min(100, i * 26), label: steps[Math.min(i, steps.length - 1)] });
       if (i >= 4) clearInterval(tick);
     }, 260);
-
     readiness()
       .then(setStatus)
-      .catch(() => setStatus(null))
+      .catch(() => setStatus(null));
+    getSettings()
+      .then(setSettings)
+      .catch(() => setSettings(null))
       .finally(() => setTimeout(() => setBoot(null), 1250));
     return () => clearInterval(tick);
   }, []);
 
   useEffect(() => {
     feed.current?.scrollTo({ top: feed.current.scrollHeight, behavior: "smooth" });
-  }, [messages]);
+  }, [messages, view]);
 
-  async function send(query: string) {
+  // Bridge entries (cards, chips, bridge composer) always start a NEW
+  // conversation: a fresh session with no inherited slots. Continuing the
+  // old thread from a surface that reads as "ask something new" is how a
+  // fishing-zone question silently inherits yesterday's port. The thread
+  // composer and its option buttons continue the session instead.
+  async function send(query: string, opts?: { fresh?: boolean }) {
     const text = query.trim();
     if (!text || busy) return;
-    setInput("");
+    if (opts?.fresh) {
+      // A fresh question orphans the previous server session: forget it
+      // so it can't be inherited from, then rotate the id.
+      const old = sessionId.current;
+      sessionId.current = newSessionId();
+      void forgetSession(old).catch(() => {});
+      setMessages([]);
+      setPanel(null);
+      setDrawer(null);
+      setMapFor(null);
+      setTurns([]);
+    }
+    setSheet(null);
+    setView("thread");
     setMessages((m) => [...m, { role: "user", text }]);
     setBusy(true);
+    const mine = ++reqId.current;
     try {
       const response = await ask({
         query: text,
         session_id: sessionId.current,
         include_recommendation: true,
       });
+      if (reqId.current !== mine) return; // superseded by New query
       setMessages((m) => [...m, { role: "bot", text: response.answer, response }]);
-      const rec = response.recommendation as Recommendation | null;
-      if (rec) {
+      setRecents(pushRecent({ query: text, verdict: response.verdict ?? null, at: Date.now() }));
+      const rec = asRecommendation(response.recommendation);
+      const origin = rec?.spatial_context?.origin;
+      if (rec && validOrigin(origin)) {
         setMapFor(rec);
-        // Open the map only when there is something on it. A refusal or a
-        // clarification has no position, and sliding an empty basemap in is
-        // motion that tells the reader nothing.
-        if (rec.spatial_context?.origin) setPanel("map");
+        setPanel("map");
+      } else {
+        // A follow-up with no position (clarification, chat, refusal) or
+        // an answer without one must not leave the previous answer's
+        // map/evidence standing beside it.
+        setPanel(null);
       }
     } catch (error) {
+      if (reqId.current !== mine) return; // superseded by New query
+      // Raw error internals stay in the console; the user gets a sentence.
+      // eslint-disable-next-line no-console
+      console.error("[orca] ask failed:", error);
       setMessages((m) => [
         ...m,
         {
           role: "bot",
-          // An exception here means the API is unreachable — a different thing
-          // from a refusal, which arrives as a normal 200 with a state.
-          text: `Could not reach the ORCA API. Is uvicorn running?\n\n${String(error)}`,
+          // Unreachable API is infrastructure, not a refusal (refusals are
+          // 200s with a state). It reads as a sentence, not an error page.
+          text: str.misc.apiUnreachable,
           response: undefined,
         },
       ]);
     } finally {
-      setBusy(false);
+      if (reqId.current === mine) setBusy(false);
+    }
+  }
+
+  function newSession() {
+    // Invalidate any in-flight answer and drop the busy flag with it; the
+    // superseded send() above will no-op on resolve instead of appending
+    // to the fresh transcript.
+    reqId.current++;
+    setBusy(false);
+    const old = sessionId.current;
+    sessionId.current = newSessionId();
+    void forgetSession(old).catch(() => {});
+    setMessages([]);
+    setPanel(null);
+    setDrawer(null);
+    setMapFor(null);
+    setTurns([]);
+    setSheet(null);
+    setView("bridge");
+  }
+
+  async function openSheet(key: SheetKey) {
+    setSheet(key);
+    if (key === "conversations") {
+      try {
+        setTurns(await sessionHistory(sessionId.current));
+      } catch {
+        setTurns([]);
+      }
+    }
+    if (key === "settings" && !settings) {
+      try {
+        setSettings(await getSettings());
+      } catch {
+        /* offline -- the sheet shows tier controls disabled */
+      }
+    }
+  }
+
+  function onRail(key: RailKey) {
+    setRailOpen(false);
+    if (key === "bridge") {
+      setSheet(null);
+      setView("bridge");
+    } else if (key === "new") {
+      newSession();
+    } else {
+      void openSheet(key);
+    }
+  }
+
+  async function changeTier(tier: string | null) {
+    setSettingsBusy(true);
+    try {
+      setSettings(await setTier(tier));
+    } catch {
+      /* unreachable API -- controls stay, tier unchanged */
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function changeDeliberating(value: boolean) {
+    setSettingsBusy(true);
+    try {
+      setSettings(await setDeliberating(value));
+    } catch {
+      /* unreachable API -- controls stay, value unchanged */
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  // One shared runner for the simple knobs: same busy discipline as tier.
+  async function changeSetting(work: () => Promise<TierSettings>) {
+    setSettingsBusy(true);
+    try {
+      setSettings(await work());
+    } catch {
+      /* unreachable API -- controls stay, value unchanged */
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  /** Jump to an answer already in the transcript. No API call. */
+  function openTurn(turnId: string) {
+    setSheet(null);
+    setView("thread");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`turn-${turnId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+  }
+
+  function openSaved(entry: SavedAnswer) {
+    const rec = asRecommendation(entry.recommendation);
+    const response = {
+      turn_id: entry.id,
+      state: "answer",
+      answer: entry.answer,
+      verdict: entry.verdict,
+      options: [],
+      verified: entry.verified ?? null,
+      numbers_checked: entry.numbers_checked ?? 0,
+      degraded: false,
+      collaboration: [],
+      collaboration_rounds: 0,
+      agent_reasoning: [],
+      narration_source: entry.narration_source ?? "",
+      llm_provider: "none",
+      used_fallback_plan: false,
+      duration_ms: 0,
+      notes: [],
+      recommendation: entry.recommendation,
+    } as unknown as ChatResponse;
+    setSheet(null);
+    setView("thread");
+    setMessages([
+      { role: "user", text: entry.query },
+      { role: "bot", text: entry.answer, response },
+    ]);
+    if (rec) {
+      setMapFor(rec);
+      setDrawer(rec);
+      setPanel(rec.spatial_context?.origin ? "map" : "evidence");
+    } else {
+      setPanel(null);
+    }
+  }
+
+  const alertsLayer = status?.layers?.["alerts"];
+  const alertBadge =
+    alertsLayer?.cached && (alertsLayer.in_force ?? 0) > 0 ? (alertsLayer.in_force as number) : null;
+  const feedState: FeedState = !status ? "unknown" : status.ready ? "live" : "empty";
+
+  const botMessages = messages.filter((m) => m.role === "bot" && m.response);
+  const lastBot = botMessages[botMessages.length - 1];
+  const lastRec = lastBot ? asRecommendation(lastBot.response!.recommendation) : null;
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const threadTitle = lastRec
+    ? (str.thread.queryTitles[lastRec.query_type] ?? lastRec.query_type)
+    : (lastUser?.text.slice(0, 48) ?? str.sheets.conversations.title);
+  const lastSaved = lastBot != null && saved.some((s) => s.id === lastBot.response!.turn_id);
+
+  function toggleSave() {
+    if (!lastBot?.response || !lastUser) return;
+    const id = lastBot.response.turn_id;
+    if (saved.some((s) => s.id === id)) {
+      removeSaved(id);
+      setSaved(loadSaved());
+    } else {
+      const entry: SavedAnswer = {
+        id,
+        query: lastUser.text,
+        answer: lastBot.text,
+        verdict: lastBot.response.verdict ?? null,
+        at: Date.now(),
+        recommendation: (lastBot.response.recommendation as Record<string, unknown> | null) ?? null,
+        verified: lastBot.response.verified ?? null,
+        numbers_checked: lastBot.response.numbers_checked ?? 0,
+        narration_source: lastBot.response.narration_source ?? "",
+      };
+      saveAnswer(entry);
+      setSaved(loadSaved());
     }
   }
 
@@ -103,7 +365,7 @@ export default function App() {
         <div className={`boot${boot.pct >= 100 ? " out" : ""}`}>
           <div className="boot-mark">ORCA</div>
           <div className="boot-title">{boot.label}</div>
-          <div className="boot-sub">Marine intelligence, South Coromandel</div>
+          <div className="boot-sub">{str.boot.sub}</div>
           <div className="boot-bar">
             <i style={{ width: `${boot.pct}%` }} />
           </div>
@@ -111,209 +373,233 @@ export default function App() {
         </div>
       )}
 
-      <div className={`app${panel ? " split" : ""}`}>
-      <aside className="sidebar">
-        <div className="brand">
-          <h1>ORCA</h1>
-          <span>Marine Intelligence · SIH 26176</span>
-        </div>
+      <div className="frame">
+        <Rail
+          active={sheet ?? (view === "bridge" ? "bridge" : null)}
+          alertBadge={alertBadge}
+          alertsCached={alertsLayer ? alertsLayer.cached : true}
+          onNav={onRail}
+          open={railOpen}
+          onClose={() => setRailOpen(false)}
+        />
 
-        <div className="status">
-          {status ? (
-            <>
-              <span className={`chip ${status.ready ? "ok" : "bad"}`}>
-                {status.ready ? "data ready" : "cache empty"}
-              </span>
-              {Object.entries(status.layers).map(([name, layer]) => (
-                <span key={name} className={`chip ${layer.cached ? "" : "bad"}`}>
-                  {name}
-                  {layer.observation_age_days != null
-                    ? ` ${layer.observation_age_days.toFixed(1)}d`
-                    : ""}
-                </span>
-              ))}
-              <span className="chip">
-                llm:{" "}
-                {Object.entries(status.llm_providers)
-                  .filter(([, up]) => up)
-                  .map(([n]) => n)
-                  .join(",") || "none (template)"}
-              </span>
-            </>
-          ) : (
-            <span className="chip bad">API unreachable</span>
-          )}
-        </div>
-
-        <div className="messages" ref={feed}>
-          {messages.length === 0 && (
-            <div className="msg bot">
-              Ask about sea safety, fishing zones, maritime boundaries, or why the
-              catch has changed.
-              {"\n\n"}Every number in an answer comes from a tool call you can
-              inspect.
-            </div>
-          )}
-
-          {messages.map((message, i) => {
-            const r = message.response;
-            const rec = r?.recommendation as Recommendation | null | undefined;
-            return (
-              <div
-                key={i}
-                className={`msg ${message.role === "user" ? "user" : "bot"}${
-                  r?.state === "error" ? " err" : ""
-                }`}
-              >
-                {r?.verdict && (
-                  <div className={`verdict ${r.verdict}`}>
-                    {r.verdict.replace("_", " ").toUpperCase()}
-                  </div>
+        {view === "bridge" ? (
+          <Bridge
+            theme={theme}
+            settings={settings}
+            feed={feedState}
+            busy={busy}
+            onSend={(text) => void send(text, { fresh: true })}
+            onOpenSettings={() => void openSheet("settings")}
+            onMenu={() => setRailOpen(true)}
+            onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+          />
+        ) : (
+          <section className="thread">
+            <div className="convo">
+              <div className="convo-bar">
+                <button
+                  className="icon-btn menu-btn"
+                  onClick={() => setRailOpen(true)}
+                  aria-label={str.rail.menuOpen}
+                  title={str.rail.menuOpen}
+                >
+                  <MenuIcon />
+                </button>
+                <button
+                  className="back"
+                  onClick={() => {
+                    setSheet(null);
+                    setView("bridge");
+                  }}
+                  aria-label={str.thread.back}
+                  title={str.thread.back}
+                >
+                  <BackIcon />
+                </button>
+                <div className="convo-id">
+                  <b>{threadTitle}</b>
+                  <span>
+                    {settings?.tier ?? "…"} · {str.meta.sector}
+                  </span>
+                </div>
+                {lastBot && (
+                  <button
+                    className="save-btn"
+                    aria-pressed={lastSaved}
+                    onClick={toggleSave}
+                    title={lastSaved ? str.thread.unsave : str.thread.save}
+                  >
+                    {lastSaved ? str.thread.unsave : str.thread.save}
+                  </button>
                 )}
+                <div className="feed" title={str.sheets.settings.dataSub}>
+                  <span
+                    className={`beacon ${feedState === "live" ? "" : feedState === "empty" ? "bad" : "warn"}`}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    {feedState === "live"
+                      ? str.topbar.feedLive
+                      : feedState === "empty"
+                        ? str.topbar.feedEmpty
+                        : str.topbar.feedUnchecked}
+                  </span>
+                </div>
+              </div>
 
-                {message.text}
-
-                {r?.options && r.options.length > 0 && (
-                  <div className={`options${r.state === "chat" ? " suggest" : ""}`}>
-                    {r.options.map((option) => (
-                      <button key={option} onClick={() => send(option)}>
-                        {option.replace(/_/g, " ")}
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {r?.agent_reasoning && r.agent_reasoning.length > 0 && (
-                  <div className="collab think">
-                    <div className="collab-h">Each agent reasoned</div>
-                    {r.agent_reasoning.map((line, n) => (
-                      <div className="collab-line" key={n}>
-                        {line}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {r?.collaboration && r.collaboration.length > 0 && (
-                  <div className="collab">
-                    <div className="collab-h">
-                      Agents collaborated ({r.collaboration_rounds} round
-                      {r.collaboration_rounds === 1 ? "" : "s"})
+              <div className="scroll" ref={feed}>
+                {messages.length === 0 && <div className="msg">{str.misc.emptyThread}</div>}
+                {messages.map((message, i) =>
+                  message.role === "user" ? (
+                    <div className="msg user enter" key={i}>
+                      <div className="bubble">{message.text}</div>
                     </div>
-                    {r.collaboration.map((line, n) => (
-                      <div className="collab-line" key={n}>
-                        {line}
+                  ) : (
+                    <div
+                      className="msg enter"
+                      key={i}
+                      id={message.response ? `turn-${message.response.turn_id}` : undefined}
+                    >
+                      <div className="who">
+                        <span className="mark" aria-hidden="true">
+                          {str.meta.appName.slice(0, 1)}
+                        </span>
+                        {str.meta.appName}
                       </div>
-                    ))}
-                  </div>
+                      {message.response ? (
+                        <AnswerView
+                          response={message.response}
+                          onSend={send}
+                          busy={busy}
+                          onOpenEvidence={() => {
+                            const rec = asRecommendation(message.response!.recommendation);
+                            if (rec) {
+                              setDrawer(rec);
+                              setPanel("evidence");
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="answer">
+                          <p>{message.text}</p>
+                        </div>
+                      )}
+                    </div>
+                  ),
                 )}
-
-                {r && (
-                  <div className="meta">
-                    {r.verified === true && <span>✓ {r.numbers_checked} numbers verified</span>}
-                    {r.verified === false && <span>✗ verification failed</span>}
-                    {r.degraded && <span>degraded</span>}
-                    <span>{r.narration_source || r.state}</span>
-                    <span>{r.duration_ms} ms</span>
-                    {rec && (
-                      <>
-                        <button
-                          onClick={() => {
-                            setDrawer(rec);
-                            setPanel("evidence");
-                          }}
-                        >
-                          evidence
-                        </button>
-                        <button
-                          onClick={() => {
-                            setMapFor(rec);
-                            setPanel("map");
-                          }}
-                        >
-                          map
-                        </button>
-                      </>
-                    )}
+                {busy && (
+                  <div className="msg">
+                    <div className="who">
+                      <span className="mark" aria-hidden="true">
+                        {str.meta.appName.slice(0, 1)}
+                      </span>
+                      {str.meta.appName}
+                    </div>
+                    <div className="answer">
+                      <p>{str.misc.thinking}</p>
+                    </div>
                   </div>
                 )}
               </div>
-            );
-          })}
-          {busy && <div className="msg bot">Planning, retrieving, verifying…</div>}
-        </div>
 
-        {messages.length === 0 && (
-          <div className="samples">
-            {SAMPLES.map((sample) => (
-              <button key={sample} onClick={() => send(sample)}>
-                {sample}
-              </button>
-            ))}
-          </div>
+              <div className="thread-composer">
+                <Composer
+                  compact
+                  busy={busy}
+                  placeholder={str.composer.followupPlaceholder}
+                  onSend={send}
+                />
+              </div>
+            </div>
+
+            {panel && (
+              <ErrorBoundary key={`side-${panel}`} label="side panel" onClose={() => setPanel(null)}>
+              <aside className="side">
+                <div className="side-head">
+                  <div className="seg" role="tablist" aria-label="Side panel">
+                    <button
+                      role="tab"
+                      aria-selected={panel === "map"}
+                      onClick={() => setPanel("map")}
+                      disabled={!mapFor}
+                    >
+                      <MapIcon />
+                      {str.side.mapTab}
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={panel === "evidence"}
+                      onClick={() => setPanel("evidence")}
+                      disabled={!drawer}
+                    >
+                      <DocIcon />
+                      {str.side.evidenceTab}
+                    </button>
+                  </div>
+                  <span className="stamp">
+                    {panel === "map"
+                      ? str.meta.sector
+                      : fill(str.side.sections.toolCalls, { n: drawer?.evidence?.length ?? 0 })}
+                  </span>
+                </div>
+
+                {/* The map stays mounted behind the evidence tab: MapLibre
+                    re-initialising on every switch would refetch tiles and
+                    lose the camera. */}
+                <div style={{ display: panel === "map" ? "contents" : "none" }}>
+                  <SectorMap recommendation={mapFor} />
+                </div>
+                {panel === "evidence" && drawer && <EvidencePane recommendation={drawer} />}
+              </aside>
+              </ErrorBoundary>
+            )}
+          </section>
         )}
 
-        <form
-          className="composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            send(input);
-          }}
-        >
-          <input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask about the sea…"
-            disabled={busy}
+        {sheet && (
+          <ErrorBoundary key={sheet} label={`sheet:${sheet}`} onClose={() => setSheet(null)}>
+          <Sheets
+            sheet={sheet}
+            onClose={() => setSheet(null)}
+            turns={turns}
+            recents={recents}
+            onReask={(q) => send(q, { fresh: true })}
+            onNewSession={newSession}
+            saved={saved}
+            answerTurnIds={botMessages.map((m) => m.response!.turn_id)}
+            onOpenTurn={openTurn}
+            busy={busy}
+            onOpenSaved={openSaved}
+            onRemoveSaved={(id) => {
+              removeSaved(id);
+              setSaved(loadSaved());
+            }}
+            alerts={
+              alertsLayer
+                ? {
+                    cached: alertsLayer.cached,
+                    in_force: alertsLayer.in_force,
+                    retrieved_at: alertsLayer.retrieved_at,
+                  }
+                : null
+            }
+            onAskAlerts={() => send(str.sheets.alerts.askPrompt, { fresh: true })}
+            settings={settings}
+            settingsBusy={settingsBusy}
+            onSetTier={(t) => void changeTier(t)}
+            onSetDeliberating={(v) => void changeDeliberating(v)}
+            onSetContextTtl={(m) => void changeSetting(() => setContextTtl(m))}
+            onSetTemplateFallback={(v) => void changeSetting(() => setTemplateFallback(v))}
+            onSetMaxRounds={(r) => void changeSetting(() => setMaxRounds(r))}
+            theme={theme}
+            onSetTheme={(t) => setTheme(t)}
+            layers={status?.layers ?? {}}
           />
-          <button type="submit" disabled={busy || !input.trim()}>
-            Ask
-          </button>
-        </form>
-      </aside>
-
-      {panel && (
-        <main className="stage">
-          <div className="panel-bar">
-            <span className="hud">
-              {panel === "map"
-                ? "South Coromandel · 78.5–82.0 E · 8.0–12.0 N"
-                : "Evidence · every number, and the call it came from"}
-            </span>
-            <div className="panel-tabs">
-              <button
-                className={panel === "map" ? "on" : ""}
-                onClick={() => setPanel("map")}
-                disabled={!mapFor}
-              >
-                map
-              </button>
-              <button
-                className={panel === "evidence" ? "on" : ""}
-                onClick={() => setPanel("evidence")}
-                disabled={!drawer}
-              >
-                evidence
-              </button>
-              <button className="x" onClick={() => setPanel(null)} aria-label="Close panel">
-                ×
-              </button>
-            </div>
-          </div>
-
-          {/* The map stays mounted once created: MapLibre re-initialising on
-              every tab switch would refetch tiles and lose the camera. */}
-          <div className="panel-body" hidden={panel !== "map"}>
-            <MapView recommendation={mapFor} />
-          </div>
-          {panel === "evidence" && drawer && (
-            <div className="panel-body scroll">
-              <EvidenceDrawer recommendation={drawer} onClose={() => setPanel(null)} />
-            </div>
-          )}
-        </main>
-      )}
+          </ErrorBoundary>
+        )}
       </div>
+
     </>
   );
 }

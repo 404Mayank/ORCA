@@ -25,7 +25,18 @@ from typing import Literal
 
 from core import config
 
-__all__ = ["LLMResult", "Role", "complete", "provider_status", "tier"]
+__all__ = [
+    "LLMResult",
+    "Role",
+    "complete",
+    "effective_order",
+    "llm_timeout_s",
+    "provider_status",
+    "set_llm_timeout_s",
+    "set_tier",
+    "tier",
+    "tier_source",
+]
 
 Role = Literal["planner", "narrator", "deliberator"]
 """Three roles, separated because they carry different risk.
@@ -56,11 +67,65 @@ def _models() -> dict:
 
 _TIERS = ("free", "fast", "paid")
 
+# Runtime override set by POST /settings. None means the environment wins.
+# Kept in-process on purpose: the venue demo runs one uvicorn, and a tier
+# switch that required a restart would never be used. A process restart
+# always returns authority to ORCA_TIER in .env.
+_TIER_OVERRIDE: str | None = None
+
 
 def tier() -> str:
-    """Active model tier from ORCA_TIER. Unknown values fall back to free."""
+    """Active model tier: the app override when set, else ORCA_TIER."""
+    if _TIER_OVERRIDE in _TIERS:
+        return _TIER_OVERRIDE
     name = os.environ.get("ORCA_TIER", "free").strip().lower()
     return name if name in _TIERS else "free"
+
+
+def tier_source() -> str:
+    """Where the active tier came from: "app" (POST /settings) or "env"."""
+    return "app" if _TIER_OVERRIDE in _TIERS else "env"
+
+
+def set_tier(name: str | None) -> str:
+    """Set or clear the runtime tier override. Returns the effective tier."""
+    global _TIER_OVERRIDE
+    if name is not None and name not in _TIERS:
+        raise ValueError(f"unknown tier {name!r}; expected one of {_TIERS}")
+    _TIER_OVERRIDE = name
+    return tier()
+
+
+def effective_order() -> list[str]:
+    """Provider order for the active tier. Same inputs complete() uses."""
+    models = _models()
+    tier_chains = _tier_chains()
+    default_order = list(
+        models.get("provider_order") or [models["provider"], models.get("fallback_provider")]
+    )
+    if isinstance(tier_chains, dict):
+        return list(tier_chains.get("order") or default_order)
+    return default_order
+
+
+# Runtime override set by POST /settings. None means models.yaml wins.
+# Same pattern as the tier override above: a process restart always
+# returns to the YAML value.
+_LLM_TIMEOUT_OVERRIDE: float | None = None
+
+
+def llm_timeout_s() -> float:
+    """Effective per-call LLM ceiling. Override wins; default from YAML."""
+    if _LLM_TIMEOUT_OVERRIDE is not None:
+        return _LLM_TIMEOUT_OVERRIDE
+    return float(_models()["limits"]["timeout_s"])
+
+
+def set_llm_timeout_s(value: float | None) -> float:
+    """Set or clear the LLM-timeout override. Returns the effective value."""
+    global _LLM_TIMEOUT_OVERRIDE
+    _LLM_TIMEOUT_OVERRIDE = value
+    return llm_timeout_s()
 
 
 def _tier_chains() -> dict[str, list[str]]:
@@ -143,7 +208,7 @@ def _post_json(url: str, key: str, body: dict, provider: str, model: str) -> dic
     )
     try:
         with urllib.request.urlopen(
-            request, timeout=float(_models()["limits"]["timeout_s"])
+            request, timeout=llm_timeout_s()
         ) as r:
             return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
@@ -361,7 +426,7 @@ def _complete_groq(role: Role, system: str, user: str) -> LLMResult:
         )
         try:
             with urllib.request.urlopen(
-                request, timeout=float(_models()["limits"]["timeout_s"])
+                request, timeout=llm_timeout_s()
             ) as r:
                 payload = json.loads(r.read().decode("utf-8"))
             break
@@ -445,7 +510,7 @@ def _complete_anthropic(role: Role, system: str, user: str) -> LLMResult:
 
     try:
         client = anthropic.Anthropic(
-            timeout=float(limits["timeout_s"]), max_retries=int(limits["max_retries"])
+            timeout=llm_timeout_s(), max_retries=int(limits["max_retries"])
         )
         response = client.messages.create(
             model=model,
@@ -516,7 +581,7 @@ def _complete_ollama(role: Role, system: str, user: str) -> LLMResult:
         f"{base}/api/generate", data=payload, headers={"Content-Type": "application/json"}
     )
     try:
-        with urllib.request.urlopen(request, timeout=float(_models()["limits"]["timeout_s"])) as r:
+        with urllib.request.urlopen(request, timeout=llm_timeout_s()) as r:
             body = json.loads(r.read().decode("utf-8"))
     except urllib.error.URLError as exc:
         return LLMResult(ok=False, provider="ollama", model=model, error=f"unreachable: {exc.reason}")

@@ -21,10 +21,10 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import agents  # noqa: F401 -- populates the agent registry
 import core.env  # noqa: F401 -- loads .env before any config is read
 import tools  # noqa: F401 -- populates the tool registry
-import agents  # noqa: F401 -- populates the agent registry
-from orchestrator.routes import chat, health
+from orchestrator.routes import chat, health, settings
 
 logger = logging.getLogger("orca")
 
@@ -52,6 +52,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(chat.router)
+app.include_router(settings.router)
 
 
 @app.on_event("startup")
@@ -75,5 +76,5 @@ def index() -> dict[str, object]:
         "service": "ORCA",
         "problem_statement": "SIH 26176",
         "docs": "/docs",
-        "endpoints": ["/health", "/readiness", "/chat", "/session/{id}"],
+        "endpoints": ["/health", "/readiness", "/chat", "/session/{id}", "/settings"],
     }

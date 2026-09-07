@@ -30,7 +30,7 @@ from core.schemas.recommendation import Recommendation
 from language import render
 from orchestrator.llm import client as llm
 
-__all__ = ["Narration", "narrate", "number_guard", "extract_numbers"]
+__all__ = ["Narration", "narrate", "number_guard", "extract_numbers", "set_template_fallback", "template_fallback_enabled"]
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "synth.md"
 
@@ -70,6 +70,26 @@ def _load_prompt() -> str:
     return PROMPT_PATH.read_text(encoding="utf-8")
 
 
+# Runtime override set by POST /settings. None means models.yaml wins.
+# Same pattern as the tier override in orchestrator/llm/client.py: a process
+# restart always returns to the YAML value.
+_TEMPLATE_FALLBACK_OVERRIDE: bool | None = None
+
+
+def template_fallback_enabled() -> bool:
+    """Whether a failed narration falls back to the template renderer."""
+    if _TEMPLATE_FALLBACK_OVERRIDE is not None:
+        return _TEMPLATE_FALLBACK_OVERRIDE
+    return bool(config.load_yaml("models.yaml").get("allow_template_fallback", True))
+
+
+def set_template_fallback(value: bool | None) -> bool:
+    """Set or clear the template-fallback override. Returns the effective value."""
+    global _TEMPLATE_FALLBACK_OVERRIDE
+    _TEMPLATE_FALLBACK_OVERRIDE = value
+    return template_fallback_enabled()
+
+
 def narrate(rec: Recommendation, language: str = "en") -> Narration:
     """Produce the paragraph a fisherman reads. Never fails.
 
@@ -78,7 +98,7 @@ def narrate(rec: Recommendation, language: str = "en") -> Narration:
     """
     reference = render(rec, language=language)
 
-    if not config.load_yaml("models.yaml").get("allow_template_fallback", True):
+    if not template_fallback_enabled():
         raise RuntimeError("allow_template_fallback is off; narrate() requires it.")
 
     result = llm.complete("narrator", system=_load_prompt(), user=reference)

@@ -32,7 +32,15 @@ from datetime import datetime, timedelta, timezone
 
 from core.schemas.intent import Intent
 
-__all__ = ["Turn", "SessionStore", "SESSIONS"]
+__all__ = [
+    "Turn",
+    "SessionStore",
+    "SESSIONS",
+    "context_ttl_minutes",
+    "pending_ttl_minutes",
+    "set_context_ttl_minutes",
+    "set_pending_ttl_minutes",
+]
 
 #: How long a turn stays eligible to be inherited from. Beyond this the
 #: context is dropped and the user is asked again.
@@ -55,6 +63,42 @@ MAX_TURNS_PER_SESSION = 20
 #: it as a slot value would attach "Rameswaram" to a question nobody remembers
 #: being asked.
 PENDING_TTL_MINUTES = 15
+
+# Runtime overrides set by POST /settings. None means the compiled default
+# above wins. Same pattern as the tier override in
+# orchestrator/llm/client.py: a process restart always returns to the
+# defaults. Every getter below is what live code must read; nothing outside
+# this module should read the bare constants directly.
+_CONTEXT_TTL_OVERRIDE: float | None = None
+_PENDING_TTL_OVERRIDE: float | None = None
+
+
+def context_ttl_minutes() -> float:
+    """Effective inheritance window. Override wins; default 90."""
+    if _CONTEXT_TTL_OVERRIDE is not None:
+        return _CONTEXT_TTL_OVERRIDE
+    return float(CONTEXT_TTL_MINUTES)
+
+
+def set_context_ttl_minutes(value: float | None) -> float:
+    """Set or clear the context-TTL override. Returns the effective value."""
+    global _CONTEXT_TTL_OVERRIDE
+    _CONTEXT_TTL_OVERRIDE = value
+    return context_ttl_minutes()
+
+
+def pending_ttl_minutes() -> float:
+    """Effective clarification window. Override wins; default 15."""
+    if _PENDING_TTL_OVERRIDE is not None:
+        return _PENDING_TTL_OVERRIDE
+    return float(PENDING_TTL_MINUTES)
+
+
+def set_pending_ttl_minutes(value: float | None) -> float:
+    """Set or clear the pending-TTL override. Returns the effective value."""
+    global _PENDING_TTL_OVERRIDE
+    _PENDING_TTL_OVERRIDE = value
+    return pending_ttl_minutes()
 
 
 @dataclass
@@ -107,7 +151,7 @@ class Turn:
         return (
             self.intent is not None
             and self.state in ("answer", "error")
-            and self.age_minutes <= CONTEXT_TTL_MINUTES
+            and self.age_minutes <= context_ttl_minutes()
         )
 
 
@@ -224,7 +268,7 @@ class SessionStore:
                 return None
             # A question from an hour ago is not one the user is still
             # answering; treat a late reply as a fresh request.
-            return last if last.age_minutes <= PENDING_TTL_MINUTES else None
+            return last if last.age_minutes <= pending_ttl_minutes() else None
 
     def record(self, session_id: str | None, turn: Turn) -> None:
         if not session_id:
