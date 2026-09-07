@@ -129,3 +129,34 @@ def test_every_event_has_a_landfall_inside_its_own_window():
         start = datetime.fromisoformat(event.start).replace(tzinfo=IST)
         end = datetime.fromisoformat(event.end).replace(tzinfo=IST)
         assert start <= event.landfall_at <= end + timedelta(days=1), event.id
+
+
+def test_a_half_fetched_event_is_not_reported_as_available(tmp_path, monkeypatch):
+    """One layer on disk is not an archive; it is a trap.
+
+    Found on 2026-09-07 while wiring replay into refresh_cache. The Mandous
+    forecast fetch failed and its marine fetch succeeded, `available()` checked
+    only for "any json file", and the next run skipped the event as "already
+    cached". A replay of that cyclone would have shown waves with no wind
+    behind them -- the same class of failure as silently substituting stale
+    data, which the project forbids outright.
+
+    Gaja is the case that keeps the rule honest: its marine archive is empty
+    upstream, and fetch_event writes an empty series deliberately so the tool
+    reading it fails honestly. The file exists, so Gaja counts as available.
+    The test is about files present, not hours in them.
+    """
+    from ingest import replay
+
+    event = replay.EVENTS["fengal"]
+    directory = tmp_path / event.id
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(replay, "REPLAY_DIR", tmp_path)
+
+    assert not replay.available(event), "an empty directory is not an archive"
+
+    (directory / "marine_11.75_79.77_20241130.json").write_text("{}", encoding="utf-8")
+    assert not replay.available(event), "waves alone are not an archive -- no wind"
+
+    (directory / "forecast_11.75_79.77_20241130.json").write_text("{}", encoding="utf-8")
+    assert replay.available(event), "both layers present is an archive"

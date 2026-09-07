@@ -200,8 +200,24 @@ def fetch_event(event: ReplayEvent) -> dict[str, int]:
 
 
 def available(event: ReplayEvent) -> bool:
+    """Whether BOTH layers of an event are on disk.
+
+    "Any json file" was not enough. On 2026-09-07 the Mandous forecast fetch
+    failed while its marine fetch succeeded, and this returned True for the
+    half-written result -- so the next run skipped it as "already cached" and a
+    replay of that cyclone would have shown waves with no wind behind them.
+    Silently answering from half an archive is the same failure as silently
+    substituting stale data, and the project forbids both.
+
+    Gaja is the case that proves the rule is about *files*, not hours: its
+    marine archive is genuinely empty upstream, and ``fetch_event`` writes an
+    empty series on purpose so the tool reading it fails honestly. That file
+    exists, so Gaja is available; Mandous, missing a file entirely, is not.
+    """
     directory = _event_dir(event)
-    return directory.exists() and any(directory.glob("*.json"))
+    if not directory.exists():
+        return False
+    return any(directory.glob("marine_*.json")) and any(directory.glob("forecast_*.json"))
 
 
 @contextmanager

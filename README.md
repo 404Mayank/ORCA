@@ -26,6 +26,7 @@ can, with a citation per threshold.
 ```bash
 pip install -e ".[geo,dev]"
 python scripts/refresh_cache.py     # populate the ingest cache (needs network)
+python scripts/refresh_cache.py --replay   # cyclone archives, for the demo
 python -m pytest -q                 # 284 passing
 uvicorn orchestrator.main:app      # API at http://127.0.0.1:8000/docs
 
