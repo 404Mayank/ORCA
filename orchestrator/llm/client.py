@@ -38,7 +38,7 @@ __all__ = [
     "tier_source",
 ]
 
-Role = Literal["planner", "narrator", "deliberator"]
+Role = Literal["planner", "narrator", "deliberator", "suggest"]
 """Three roles, separated because they carry different risk.
 
 ``planner`` chooses tools; its output is validated before anything runs.

@@ -393,10 +393,20 @@ def _chat(query: str, text: str, suggestions: list[str] | None = None) -> Planne
     safe = strip_numbers(text).strip()
     # Order-preserving dedupe, cap four: the model repeats itself (seen:
     # the same suggestion twice in one reply), and a duplicated button is
-    # sloppy. Previous-turn suggestions are NOT filtered here -- session
+    # sloppy. Suggestions are stripped like the text: a button sends a
+    # query, and a digit in it would smuggle an unverified figure into the
+    # next turn. Previous-turn suggestions are NOT filtered here -- session
     # Turns record no options, so the history to de-repeat against is
     # unreachable; within-turn dedupe is the honest limit.
-    seen = list(dict.fromkeys([s for s in (suggestions or SUGGESTIONS) if s.strip()]))[:4]
+    seen = list(
+        dict.fromkeys(
+            [
+                s
+                for s in (strip_numbers(str(item)) for item in (suggestions or SUGGESTIONS))
+                if s.strip()
+            ]
+        )
+    )[:4]
     return PlannerOutput(
         intent=Intent(query_type=QueryType.SAFETY_ASSESS, raw_query=query),
         state="chat",

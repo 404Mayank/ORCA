@@ -20,6 +20,7 @@ The two gates are non-negotiable and both live here rather than in the route:
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,6 +28,7 @@ from typing import Any
 
 from agents.intent_planner_agent import plan_query
 from agents.narrate import narrate
+from agents.suggest import SUGGEST_BUDGET_S, suggest_followups
 from agents.synthesis_agent import build_recommendation
 from core.schemas.intent import Intent
 from core.schemas.recommendation import Recommendation
@@ -62,6 +64,9 @@ class TurnResult:
     # than making the user retype "FRP boat".
     missing_slots: list[str] = field(default_factory=list)
     options: list[str] = field(default_factory=list)
+    #: Where the answer-turn follow-ups came from: model | rules | static |
+    #: mixed. Empty on turns that show no answer follow-ups.
+    suggestion_source: str = ""
 
     #: Inter-agent requests accepted this turn, as human-readable lines.
     collaboration: list[str] = field(default_factory=list)
@@ -241,13 +246,14 @@ def run_turn(
         # fallback frequency from logs. Counts only, no user text -- notes
         # travel on the result itself, not here.
         logger.info(
-            "turn=%s state=%s provider=%s attempts=%d fallback=%s narration=%s notes=%d",
+            "turn=%s state=%s provider=%s attempts=%d fallback=%s narration=%s suggest=%s notes=%d",
             result.turn_id,
             result.state,
             result.llm_provider,
             planning.attempts,
             result.used_fallback_plan,
             result.narration_source or "-",
+            result.suggestion_source or "-",
             len(result.notes),
         )
         SESSIONS.record(
@@ -260,6 +266,7 @@ def run_turn(
                 answer=result.answer,
                 verdict=result.verdict,
                 missing_slots=result.missing_slots,
+                options=result.options,
             ),
         )
         return result
@@ -404,16 +411,62 @@ def run_turn(
             )
         )
 
-    # -- narrate -----------------------------------------------------------
-    # Only the source is emitted, never the text: streaming partial prose
-    # would display numbers before the guard passes on the complete text.
-    narration = narrate(recommendation, language=language)
-    emit("narrate", source=narration.source)
+    # -- narrate + suggest -------------------------------------------------
+    # Only the narration source is emitted, never the text: streaming
+    # partial prose would display numbers before the guard passes on the
+    # complete text.
+    #
+    # Suggestions run CONCURRENTLY with narration in a ThreadPoolExecutor
+    # (turn.py is fully synchronous -- no async runtime exists here).
+    # Wait semantic: the answer ships at max(narration_done,
+    # min(suggest_done, 6s)). Narration is never delayed by this feature;
+    # a suggest call still in flight 6s past narration is abandoned and
+    # the rule-based set ships instead. Note the abandon is
+    # latency-bounded, not cost-free: the dropped future's HTTP request
+    # may still complete server-side and spend tokens; what is bounded is
+    # the user's wait. Both read the same already-verified object, so
+    # there is no ordering dependency between them.
+    prior_options = SESSIONS.prior_answer_options(session_id)
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    try:
+        narration_future = pool.submit(narrate, recommendation, language)
+        suggest_future = pool.submit(
+            suggest_followups, recommendation, intent, prior_options
+        )
+        narration = narration_future.result()
+        emit("narrate", source=narration.source)
+        try:
+            suggestions = suggest_future.result(timeout=SUGGEST_BUDGET_S)
+        except concurrent.futures.TimeoutError:
+            suggestions = None
+            notes.append(
+                "suggest call exceeded the 6s budget; rule-based follow-ups served"
+            )
+    finally:
+        # Never wait for an abandoned suggest call here: the context
+        # manager's implicit shutdown(wait=True) would hold the answer
+        # for the full hung call, voiding the budget above.
+        pool.shutdown(wait=False, cancel_futures=True)
+    if suggestions is None:
+        from agents.intent_planner_agent import SUGGESTIONS as _STATIC
+        from agents.suggest import _assemble, apply_hygiene, rule_suggestions
+
+        rules = [
+            t
+            for t in apply_hygiene(rule_suggestions(intent))
+            if t not in prior_options
+        ]
+        static = [
+            t for t in apply_hygiene(list(_STATIC)) if t not in prior_options
+        ]
+        suggestions = _assemble([(rules, "rules"), (static, "static")])
     return finish(
         TurnResult(
             state="answer",
             answer=narration.text,
             recommendation=recommendation,
+            options=list(suggestions.texts),
+            suggestion_source=suggestions.source,
             collaboration=teamwork.describe(),
             collaboration_rounds=teamwork.rounds,
             agent_reasoning=[

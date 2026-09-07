@@ -54,6 +54,13 @@ groq:
     reasoning_effort: low
     temperature: 0.1
     max_tokens: 700
+  suggest:
+    # Post-answer follow-up questions: short list, low temp, small budget.
+    # Same model as the deliberator -- the narrowest capable one.
+    model: openai/gpt-oss-20b
+    reasoning_effort: low
+    temperature: 0.1
+    max_tokens: 200
 
 anthropic:
   # Model ids are exact strings; never append a date suffix.
@@ -73,6 +80,13 @@ anthropic:
     model: claude-haiku-4-5
     effort: low
     max_tokens: 700
+  suggest:
+    # Post-answer follow-up questions: short list, low temp, small budget.
+    # Same model as the deliberator -- the narrowest capable one.
+    model: claude-haiku-4-5
+    effort: low
+    temperature: 0.1
+    max_tokens: 200
 
 ollama:
   # The venue will lose internet. This tier keeps the demo alive.
@@ -82,6 +96,8 @@ ollama:
   narrator:
     model: "llama3.1:8b"
   deliberator:
+    model: "llama3.1:8b"
+  suggest:
     model: "llama3.1:8b"
 
 opencode:
@@ -111,6 +127,11 @@ opencode:
     # One call per active agent per turn: same free-first chain.
     temperature: 0.1
     max_tokens: 700
+  suggest:
+    # Post-answer follow-up questions: short list, low temp, small budget.
+    # Same chain as the deliberator -- the narrowest capable model.
+    temperature: 0.1
+    max_tokens: 200
 
 opencode-go:
   # Second Zen gateway (https://opencode.ai/zen/go/v1), both transports:
@@ -132,6 +153,11 @@ opencode-go:
   deliberator:
     temperature: 0.1
     max_tokens: 700
+  suggest:
+    # Post-answer follow-up questions: short list, low temp, small budget.
+    # Same chain as the deliberator -- the narrowest capable model.
+    temperature: 0.1
+    max_tokens: 200
 
 # Model tiers, selected by ORCA_TIER (free | fast | paid, default free).
 # A tier overrides provider order and per-provider chains; roles, guards and

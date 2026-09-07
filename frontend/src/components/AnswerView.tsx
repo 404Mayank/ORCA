@@ -255,6 +255,10 @@ export default function AnswerView({ response, onOpenEvidence, onSend, busy }: P
         {response.used_fallback_plan && <span>{t.fallbackPlan}</span>}
         {response.narration_source === "llm" && <span>{t.narratedByLlm}</span>}
         {response.narration_source === "template" && <span>{t.narratedByTemplate}</span>}
+        {response.suggestion_source === "model" && <span>{t.suggestedByModel}</span>}
+        {response.suggestion_source === "rules" && <span>{t.suggestedByRules}</span>}
+        {response.suggestion_source === "static" && <span>{t.suggestedByStatic}</span>}
+        {response.suggestion_source === "mixed" && <span>{t.suggestedByMixed}</span>}
         {response.llm_provider && response.llm_provider !== "none" && (
           <span>{response.llm_provider}</span>
         )}

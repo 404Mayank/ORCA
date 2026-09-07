@@ -86,6 +86,10 @@ class ChatResponse(BaseModel):
     narration_source: str = Field(
         default="", description="'llm' when the model's prose passed the number guard, else 'template'."
     )
+    suggestion_source: str = Field(
+        default="",
+        description="'model' | 'rules' | 'static' | 'mixed': where the answer-turn follow-ups came from. 'mixed' means the final button set was drawn from more than one source.",
+    )
     llm_provider: str = "none"
     used_fallback_plan: bool = False
     duration_ms: int = 0
@@ -128,6 +132,7 @@ def _to_response(result: Any, include_recommendation: bool) -> ChatResponse:
         collaboration_rounds=result.collaboration_rounds,
         agent_reasoning=result.agent_reasoning,
         narration_source=result.narration_source,
+        suggestion_source=getattr(result, "suggestion_source", ""),
         llm_provider=result.llm_provider,
         used_fallback_plan=result.used_fallback_plan,
         duration_ms=result.duration_ms,

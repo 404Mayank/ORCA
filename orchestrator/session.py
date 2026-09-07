@@ -120,6 +120,10 @@ class Turn:
     #: On a clarification, which slots were still needed. The user's next turn
     #: is the answer to exactly this.
     missing_slots: list[str] = field(default_factory=list)
+    #: Follow-up suggestion buttons shown on this turn. Recorded so the next
+    #: answer turn can de-repeat against them instead of offering the same
+    #: buttons twice. Server-internal: not exposed on /session/{id}.
+    options: list[str] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     @property
@@ -269,6 +273,30 @@ class SessionStore:
             # A question from an hour ago is not one the user is still
             # answering; treat a late reply as a fresh request.
             return last if last.age_minutes <= pending_ttl_minutes() else None
+
+    def prior_answer_options(self, session_id: str | None) -> list[str]:
+        """Suggestion buttons shown on the last answer turn, for de-repeat.
+
+        Depth is 1 by default and chat turns are skipped when scanning:
+        a chat turn shows conversational suggestions, not answer
+        follow-ups, so filtering against them would suppress fresh buttons
+        for no reason. Clarification option values (raw enum strings like
+        ``frp_9m``) make the filter a harmless no-op -- stated, not
+        overlooked. Reads under the store lock like every other accessor.
+        """
+        if not session_id:
+            return []
+        with self._lock:
+            turns = self._sessions.get(session_id) or []
+            for turn in reversed(turns):
+                if turn.state == "chat":
+                    continue
+                if turn.state == "answer":
+                    return list(turn.options)
+                # A clarification, refusal or error in between ends the
+                # chain: its buttons belong to a different question.
+                return []
+            return []
 
     def record(self, session_id: str | None, turn: Turn) -> None:
         if not session_id:

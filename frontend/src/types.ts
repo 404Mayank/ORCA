@@ -339,6 +339,8 @@ export interface ChatResponse {
   agent_reasoning?: string[];
   /** 'llm' when the model's prose passed the number guard, else 'template'. */
   narration_source?: string;
+  /** 'model' | 'rules' | 'static' | 'mixed': where the answer-turn follow-ups came from. 'mixed' means the final button set was drawn from more than one so */
+  suggestion_source?: string;
   llm_provider?: string;
   used_fallback_plan?: boolean;
   duration_ms?: number;
