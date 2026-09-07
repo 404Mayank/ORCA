@@ -2,7 +2,7 @@
 
 Living status document. Updated as work lands, not as it is planned.
 
-**Last updated:** 2026-09-07 · **Tests:** 376 passing, 15 skipped, 0 failed (venv, with weather+alert cache) · **Head:** Phase 4 + streams 0-4, 6 · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
+**Last updated:** 2026-09-07 · **Tests:** 380 passing, 15 skipped, 0 failed (venv, weather+alert cache, hermetic) · **Head:** Phase 4 + streams 0-4, 6 · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
 
 ---
 
