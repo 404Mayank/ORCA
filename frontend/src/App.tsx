@@ -400,11 +400,19 @@ export default function App() {
 
   const botMessages = messages.filter((m) => m.role === "bot" && m.response);
   const lastBot = botMessages[botMessages.length - 1];
-  const lastRec = lastBot ? asRecommendation(lastBot.response!.recommendation) : null;
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
-  const threadTitle = lastRec
-    ? (str.thread.queryTitles[lastRec.query_type] ?? lastRec.query_type)
-    : (lastUser?.text.slice(0, 48) ?? str.sheets.conversations.title);
+  // Thread title anchors to the FIRST exchange, not the last: a thread is
+  // named for what started it, and the title must not drift every time a
+  // later question classifies differently. An opening exchange with no
+  // recommendation (clarification, chat, refusal) leaves first-user-text
+  // as the permanent title even if a later answer classifies -- stable is
+  // correct.
+  const firstBot = botMessages[0];
+  const firstRec = firstBot ? asRecommendation(firstBot.response!.recommendation) : null;
+  const firstUser = messages.find((m) => m.role === "user");
+  const threadTitle = firstRec
+    ? (str.thread.queryTitles[firstRec.query_type] ?? firstRec.query_type)
+    : (firstUser?.text.slice(0, 48) ?? str.sheets.conversations.title);
   const lastSaved = lastBot != null && saved.some((s) => s.id === lastBot.response!.turn_id);
 
   function toggleSave() {
