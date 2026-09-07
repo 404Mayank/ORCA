@@ -149,6 +149,34 @@ def test_invalid_key_is_terminal_for_the_gateway(monkeypatch):
     assert len(script.requests) == 1, "a bad key must not walk the chain"
 
 
+def test_late_401_walks_on_for_free_ids(monkeypatch):
+    # A contributor-scoped key 401s on paid siblings but serves free ids.
+    # Found live: only a first-id 401 is terminal. Measured 2026-09-07.
+    monkeypatch.setenv("OPENCODE_API_KEY", "contributor-key")
+    script = _Script(_responses_payload("via free"))
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client._complete_opencode("planner", "sys", "user")
+    assert result.ok and result.model == "muse-spark-1.3-contributor-free"
+
+    calls = []
+
+    def _mixed(request, *args, **kwargs):
+        calls.append(json.loads(request.data.decode())["model"])
+        if len(calls) == 1:
+            raise _http_error(429)
+        if len(calls) == 2:
+            raise _http_error(401, body="not entitled")
+        return _FakeResponse(_responses_payload("via later free"))
+
+    monkeypatch.setattr("urllib.request.urlopen", _mixed)
+    result = client._complete_opencode("planner", "sys", "user")
+    assert result.ok and result.model == "muse-spark-1.2-contributor-free"
+    assert calls == [
+        "muse-spark-1.3-contributor-free", "muse-spark-1.3",
+        "muse-spark-1.2-contributor-free",
+    ]
+
+
 def test_chain_exhaustion_falls_through_to_groq(monkeypatch):
     _env_off(monkeypatch)
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")

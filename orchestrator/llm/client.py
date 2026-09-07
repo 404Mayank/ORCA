@@ -215,7 +215,7 @@ def _complete_chain(provider, key, models, role, system, user, chat_url, respons
         {"role": "user", "content": user},
     ]
     last: LLMResult = LLMResult(ok=False, provider=provider, error="no models configured")
-    for model in models:
+    for pos, model in enumerate(models):
         if _zen_transport(model) == "responses":
             url, body, parse = (
                 responses_url,
@@ -231,7 +231,11 @@ def _complete_chain(provider, key, models, role, system, user, chat_url, respons
         payload = _post_json(url, key, body, provider, model)
         if isinstance(payload, LLMResult):
             last = payload
-            if payload.error == "invalid API key":
+            # 401 on the FIRST id means the key itself is bad: terminal for
+            # the gateway. 401 on a later id is model-level access (e.g. a
+            # contributor key asking for a paid sibling): the remaining ids
+            # may still serve, so the chain walks on. Found live 2026-09-07.
+            if payload.error == "invalid API key" and pos == 0:
                 break
             continue
         last = parse(payload, provider, model)

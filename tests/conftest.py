@@ -15,7 +15,28 @@ condition, not wait for it. This fixture does.
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def hermetic_env(monkeypatch):
+    """Scrub credentials so the suite never touches live services.
+
+    core.env auto-loads .env at import, which is what the app wants -- but a
+    test reaching llm.complete (or Supabase) without an explicit stub would
+    then spend real money and minutes: found 2026-09-07 when collaboration
+    tests started deliberating against live models after a .env appeared.
+    Tests that need a key set it themselves via monkeypatch; everything else
+    runs hermetic.
+    """
+    for var in list(os.environ):
+        if var.startswith(("OPENCODE_", "GROQ_", "ANTHROPIC_")) or var in {
+            "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY",
+            "DATABASE_URL", "COPERNICUS_USERNAME", "COPERNICUS_PASSWORD",
+        }:
+            monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture
