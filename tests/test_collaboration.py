@@ -7,7 +7,7 @@ between a multi-agent system and a pipeline with several modules in it.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -16,8 +16,14 @@ from agents.base import AgentRequest
 from core.provenance import ToolCallLog
 from core.schemas.intent import Intent, QueryType, SpatialReference, VesselClass
 from core.schemas.tool_io import GeoPoint, Provenance
-from orchestrator.collaborate import MAX_ADDED_STEPS, MAX_ROUNDS, run_with_collaboration
+from orchestrator.collaborate import (
+    MAX_ADDED_STEPS,
+    MAX_ROUNDS,
+    _deliberate_all,
+    run_with_collaboration,
+)
 from orchestrator.executor import ExecutionResult
+from orchestrator.llm.client import LLMResult
 from orchestrator.validate_plan import fallback_plan, validate_plan
 from tools.geo.nearest import ResolvePlaceOut
 from tools.ocean.pfz_candidates import PFZCandidate, PFZCandidatesOut
@@ -45,7 +51,7 @@ def _result(*calls) -> ExecutionResult:
             step_id=step_id,
             args={},
             output=output,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             duration_ms=1,
         )
         outputs[step_id] = output
@@ -284,3 +290,46 @@ def test_a_non_critical_tool_from_an_llm_stays_optional():
         8,
     )
     assert step["optional"] is True
+
+
+def test_deliberations_run_concurrently_in_agent_order(monkeypatch):
+    """Deliberation latency stacks per agent unless fanned out.
+
+    Two agents x 0.4 s sleeps finish well under the 0.8 s sequential floor,
+    and results come back in agent order so traces read deterministically.
+    """
+    import threading
+    import time
+
+    from core.units import Range, Unit
+    from tools.weather.wave_forecast import WaveForecastOut
+
+    entered: list[str] = []
+
+    def fake_complete(role, system, user):
+        entered.append(threading.current_thread().name)
+        time.sleep(0.4)
+        return LLMResult(
+            ok=True,
+            text='{"assessment": "fine", "requests": [], "concerns": []}',
+            provider="stub",
+            model="stub",
+        )
+
+    monkeypatch.setattr("agents.deliberate.llm.complete", fake_complete)
+    wave = WaveForecastOut(
+        provenance=Provenance(source="open_meteo_marine", authority="Open-Meteo"),
+        significant_wave_height=Range(min=0.3, max=0.56, unit=Unit.METRE),
+        wave_period=Range(min=3.75, max=6.15, unit=Unit.SECOND),
+    )
+    result = _result(("s1", "resolve_place", _place()), ("s2", "wave_forecast", wave))
+    pending = [a for a in agents.all_agents() if a.fragment(result, _intent()).step_ids]
+    assert len(pending) >= 2
+
+    started = time.monotonic()
+    thoughts = _deliberate_all(pending, result, _intent())
+    wall = time.monotonic() - started
+
+    assert [t.agent for t in thoughts] == [a.name for a in pending]
+    assert all(t.ok for t in thoughts)
+    assert wall < 0.7, f"deliberations ran sequentially ({wall:.2f} s)"
