@@ -4,6 +4,7 @@ import MapView from "./MapView";
 
 interface Props {
   recommendation: Recommendation | null;
+  imbl: Array<[number, number]> | null;
 }
 
 /**
@@ -13,7 +14,7 @@ interface Props {
  * No cursor-depth fiction: without bathymetry in the answer there is
  * no depth to report.
  */
-export default function SectorMap({ recommendation }: Props) {
+export default function SectorMap({ recommendation, imbl }: Props) {
   const maybe = recommendation?.spatial_context?.origin;
   // Never trust a coordinate's type: backend JSON and old localStorage can
   // both hand us strings. No valid origin means no map, not a crash.
@@ -28,7 +29,7 @@ export default function SectorMap({ recommendation }: Props) {
 
   return (
     <div id="mapPane" className="pane">
-      <MapView recommendation={origin ? recommendation : null} />
+      <MapView recommendation={origin ? recommendation : null} imbl={imbl} />
       <div className="map-readout">{readout}</div>
       <div className="map-key">
         <div style={{ ["--k" as string]: "var(--ink)" }}>
@@ -43,6 +44,12 @@ export default function SectorMap({ recommendation }: Props) {
           <i className="dash" />
           {str.side.legendBox}
         </div>
+        {imbl && imbl.length > 1 && (
+          <div style={{ ["--k" as string]: "var(--red)" }}>
+            <i className="dash" />
+            {str.side.legendBoundary}
+          </div>
+        )}
       </div>
     </div>
   );

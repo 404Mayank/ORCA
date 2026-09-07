@@ -8,11 +8,14 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      "/chat/stream": "http://127.0.0.1:8000",
       "/chat": "http://127.0.0.1:8000",
       "/readiness": "http://127.0.0.1:8000",
       "/health": "http://127.0.0.1:8000",
       "/session": "http://127.0.0.1:8000",
       "/settings": "http://127.0.0.1:8000",
+      "/geo": "http://127.0.0.1:8000",
+      "/replay": "http://127.0.0.1:8000",
     },
   },
 });

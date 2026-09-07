@@ -47,9 +47,14 @@ export default function EvidencePane({ recommendation: r }: Props) {
           <div className="ev-sec">{secs.drivers}</div>
           {r.drivers!.map((d) => {
             const e = d.evaluation;
-            // A zero threshold would divide by zero: clamp the denominator,
-            // the bar then reads full, which a breaching zero-limit is.
-            const pct = Math.min(100, (e.observed.max / (e.threshold.value || 1)) * 100);
+            // Bar geometry follows the threshold direction: ceilings fill
+            // as the observed climbs, floors (e.g. visibility minimums)
+            // fill as it sinks toward the limit. Breach always reads full.
+            const ratio =
+              e.threshold.comparison === "gte" || e.threshold.comparison === "gt"
+                ? e.threshold.value / (e.observed.max || 1)
+                : e.observed.max / (e.threshold.value || 1);
+            const pct = Math.min(100, Math.max(0, ratio * 100));
             return (
               <div className="src" key={d.id}>
                 <div className="src-top">
@@ -176,7 +181,7 @@ export default function EvidencePane({ recommendation: r }: Props) {
                 <span
                   className="fill"
                   style={{
-                    width: `${(r.confidence.overall ?? 0) * 100}%`,
+                    width: `${Math.min(100, Math.max(0, (r.confidence.overall ?? 0) * 100))}%`,
                     ["--tone" as string]: meterTone(r.confidence.overall ?? 0),
                   }}
                 />
@@ -184,6 +189,25 @@ export default function EvidencePane({ recommendation: r }: Props) {
               <span className="lbl">{((r.confidence.overall ?? 0) * 100).toFixed(0)}%</span>
             </div>
             <p>{r.confidence.basis}</p>
+            {r.confidence.by_claim &&
+              Object.entries(r.confidence.by_claim).map(([claimId, q]) => {
+                const pct = Math.min(100, Math.max(0, (q ?? 0) * 100));
+                return (
+                  <div className="meter" key={claimId}>
+                    <span className="lbl">{claimId}</span>
+                    <span className="track">
+                      <span
+                        className="fill"
+                        style={{
+                          width: `${pct}%`,
+                          ["--tone" as string]: meterTone(q ?? 0),
+                        }}
+                      />
+                    </span>
+                    <span className="lbl">{pct.toFixed(0)}%</span>
+                  </div>
+                );
+              })}
           </div>
         </>
       )}

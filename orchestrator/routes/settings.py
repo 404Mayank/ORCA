@@ -34,7 +34,7 @@ class SettingsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tier: str = Field(description="Effective tier: the override when set, else ORCA_TIER.")
-    tier_source: str = Field(description="'app' when POST /settings set it, else 'env'.")
+    tier_source: str = Field(description="'app', 'env', or 'default' (neither set).")
     tiers: list[str] = Field(description="Accepted values for POST /settings.")
     provider_order: list[str] = Field(description="Provider order the active tier uses.")
     providers: dict[str, bool] = Field(description="Which providers look usable right now.")
@@ -50,6 +50,20 @@ class SettingsResponse(BaseModel):
     )
     llm_timeout_s: float = Field(description="Per-call ceiling for LLM providers (seconds).")
     step_timeout_s: float = Field(description="Default ceiling for one tool call (seconds).")
+
+
+#: Knobs that POST /settings/reset can return to compiled defaults.
+#: Tier is excluded: null-clearing it already returns to ORCA_TIER.
+ResettableKnob = Literal[
+    "deliberating",
+    "context_ttl_min",
+    "pending_ttl_min",
+    "max_rounds",
+    "max_added_steps",
+    "template_fallback",
+    "llm_timeout_s",
+    "step_timeout_s",
+]
 
 
 class SettingsUpdate(BaseModel):
@@ -70,6 +84,22 @@ class SettingsUpdate(BaseModel):
     template_fallback: bool | None = Field(default=None)
     llm_timeout_s: float | None = Field(default=None, ge=5, le=120)
     step_timeout_s: float | None = Field(default=None, ge=5, le=120)
+    reset: list[ResettableKnob] = Field(
+        default_factory=list,
+        description="Knobs to return to compiled defaults. Unknown names 422 via the Literal.",
+    )
+
+
+_RESETTABLE = {
+    "deliberating": lambda: collaborate.set_deliberating(None),
+    "context_ttl_min": lambda: session_state.set_context_ttl_minutes(None),
+    "pending_ttl_min": lambda: session_state.set_pending_ttl_minutes(None),
+    "max_rounds": lambda: collaborate.set_max_rounds(None),
+    "max_added_steps": lambda: collaborate.set_max_added_steps(None),
+    "template_fallback": lambda: set_template_fallback(None),
+    "llm_timeout_s": lambda: llm.set_llm_timeout_s(None),
+    "step_timeout_s": lambda: set_default_timeout_s(None),
+}
 
 
 def current_settings() -> SettingsResponse:
@@ -117,4 +147,6 @@ def update_settings(update: SettingsUpdate) -> SettingsResponse:
         llm.set_llm_timeout_s(update.llm_timeout_s)
     if update.step_timeout_s is not None:
         set_default_timeout_s(update.step_timeout_s)
+    for name in update.reset:
+        _RESETTABLE[name]()
     return current_settings()

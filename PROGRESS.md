@@ -63,9 +63,80 @@ can't wait for JS). Desktop + 390px shots read clean, zero console errors.
 - **Mobile shell:** hamburger drawer rail under 820px, sticky
   screen-bottom thread composer, compact fading chips, two-row topbar,
   bridge kbd hint hidden on phones. Verified at 390×844.
-- **Still open from the audit (not built):** `visual_layers` geometry on
-  the map, clarification/refusal/window rendering, promise-driven boot,
-  `missing_slots`/fallback-plan surfacing, sheet focus trap + Escape.
+- **Still open:** route legs on the map (waypoints never reach the
+  recommendation), thread-title drift, focus restore on sheet close,
+  settings reset-all button (API supports `reset`, no UI), vis_km column
+  in replay table, Tamil, MPA/EEZ geometry, INCOIS high-wave feed,
+  scheduled ingest, satellite cache (SST/chlorophyll still missing -
+  CoastWatch SSL fails from here, PFZ/causal stay degraded).
+
+## What landed on 2026-09-07 (later) — replay critique fixes
+
+The replay critiquer returned revise with one high-severity item and
+it was right: the swap hazard was prose-only. Now `/chat` and
+`/chat/stream` 503 (Retry-After 60) while a replay owns the cache --
+loud refusal instead of poisoned answers, covered by test. Also fixed:
+`first_breach` derives from the breach list (never the display string),
+offset-aware `landfall`, warning field in the payload, `step_hours`
+422s out of range, verdict as `str` (a new band degrades, never 500s),
+lock release inside `finally`, busy-then-success + FAILED-nulls +
+summary-None + exact-409 tests. Suite: 423 passed / 11 skipped (the
+Fengal archive un-skipped four). Left as documented: multi-worker
+deployments need single-worker constraint (stated in code + payload).
+
+## What landed on 2026-09-07 (later) — critique fixes, both workers
+
+Two glm critiquers reviewed the workers' output; every confirmed item
+is fixed and live-verified: replay warning + note rendered, IST-pinned
+times (Asia/Kolkata, year included), summary shape guard, focus-in +
+full trap in both sheets (12/12 Tabs stay inside, Escape closes),
+keyboard-scrollable replay table region, clamped overall meter. The
+replay trajectory screenshot shows it all working.
+
+## What landed on 2026-09-07 (later) — replay endpoint
+
+`POST /replay/{event_id}` runs an archived cyclone through the
+production tools and returns the verdict trajectory. Same row-building
+as `scripts/replay.py` (gust peak, breaching drivers first), guarded by
+a process-global lock with 409-on-busy, 404 unknown, 409 + fetch hint
+when the archive is missing. 5 tests (row rules against the real risk
+function, lead-time math, lock/404/409 paths). Fengal archive fetched
+(120 h/layer) and driven live: `no_go` 71.5 h before landfall,
+recovering after passage. Suite: 413 passed / 15 skipped.
+
+## What landed on 2026-09-07 (later) — live pipeline trace (SSE)
+
+`POST /chat/stream` runs the identical `run_turn()` in a worker thread
+and yields stage frames from a per-turn `ProgressBus`
+(`orchestrator/progress.py`): plan → execute → deliberate → collaborate →
+synthesise → verify → narrate, then the full `ChatResponse` as `done`.
+The UI renders a live trace with per-agent rows and falls back to
+blocking `POST /chat` on any transport trouble. Settled design point:
+stage events stream, prose never streams pre-guard -- narration appears
+via a post-guard reveal, so the verify-before-narrate order is
+untouched. `tests/test_stream.py` pins it: allowlist-only stages in
+order, no fabricated fields, stream==blocking answer, concurrent turns
+both terminate, verify-fail emits no narrate. Suite: 405 passed /
+15 skipped. Verified live in-browser: trace rows appear mid-turn.
+Also shipped: pointer/typing-reactive composer halo + backdrop parallax
+(rAF-throttled custom props, composite-only, reduced-motion and mobile
+kill-switches), shared `_to_response` builder so both routes agree.
+
+## What landed on 2026-09-07 (later) — treaty line on the chart
+
+The audit's top map complaint is fixed without touching the verdict
+path: `GET /geo/boundaries` serves the IMBL polyline from the same
+digitised treaty source the geofence tool tests (`imbl_linestring()`),
+so the drawn line and the checked line cannot drift apart. MapView draws
+it red-dashed with a legend row that only appears when the fetch
+succeeds; a failed fetch leaves an honest boundary-less map. 3 tests
+(positions match source, line crosses the box, provenance travels).
+Suite: 401 passed / 15 skipped. Verified with a live geofence answer:
+Rameswaram origin + treaty line on the sector chart.
+
+Route legs stay un-drawn on purpose: `optimise_route` waypoints never
+reach the recommendation (no waypoint claims in synthesis), and piping
+them through is a synthesis change for another pass.
 
 ## What landed on 2026-09-07 (later) — worker knob batch + UI surfacing
 

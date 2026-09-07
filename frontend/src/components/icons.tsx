@@ -192,3 +192,13 @@ export function MenuIcon({ size = 18 }: IconProps) {
     </svg>
   );
 }
+
+export function StormIcon({ size = 19 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M12 3a9 9 0 1 0 9 9" />
+      <path d="M12 7a5 5 0 1 0 5 5" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}

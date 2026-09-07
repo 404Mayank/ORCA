@@ -58,6 +58,7 @@ from agents.deliberate import Deliberation, deliberate
 from core.schemas.intent import Intent, QueryType
 from core.schemas.plan import Plan
 from orchestrator.executor import ExecutionResult, execute_plan_sync
+from orchestrator.progress import ProgressBus
 from orchestrator.validate_plan import validate_plan
 
 __all__ = [
@@ -272,7 +273,12 @@ def _step_for(request: AgentRequest, number: int) -> dict[str, Any]:
     }
 
 
-def _deliberate_all(pending: list, result: ExecutionResult, intent: Intent) -> list[Deliberation]:
+def _deliberate_all(
+    pending: list,
+    result: ExecutionResult,
+    intent: Intent,
+    progress: ProgressBus | None = None,
+) -> list[Deliberation]:
     """One deliberation call per agent, concurrently, in agent order.
 
     Deliberations are independent -- each agent reads the same finished
@@ -285,7 +291,18 @@ def _deliberate_all(pending: list, result: ExecutionResult, intent: Intent) -> l
     if not pending:
         return []
     with ThreadPoolExecutor(max_workers=min(4, len(pending)), thread_name_prefix="orca-deliberate") as pool:
-        return list(pool.map(lambda agent: deliberate(agent, result, intent), pending))
+        thoughts = list(pool.map(lambda agent: deliberate(agent, result, intent), pending))
+    # One event per finished deliberation. Assessment text is already
+    # number-stripped at the source; cap length defensively anyway.
+    if progress is not None:
+        for thought in thoughts:
+            progress.emit(
+                "deliberate",
+                agent=thought.agent,
+                used_llm=bool(thought.used_llm),
+                assessment=(thought.assessment or "")[:300],
+            )
+    return thoughts
 
 
 def run_with_collaboration(
@@ -293,6 +310,7 @@ def run_with_collaboration(
     intent: Intent,
     turn_id: str = "t_001",
     deliberating: bool = True,
+    progress: ProgressBus | None = None,
 ) -> CollaborationResult:
     """Execute a plan, then let the agents extend it until they are satisfied.
 
@@ -302,7 +320,9 @@ def run_with_collaboration(
     The model may add requests; it may never remove one the rules produced.
 
     ``deliberating=False`` runs the rules alone -- used by tests, and the
-    automatic behaviour when no provider is reachable.
+    automatic behaviour when no provider is reachable. The parameter is now
+    test-only in production: turn.py never passes it, so the module-global
+    gate (deliberating_enabled, set via POST /settings) is what matters.
 
     Never raises and never returns a worse result than a single execution: if a
     round produces nothing valid, the previous wave's result is what is
@@ -362,7 +382,9 @@ def run_with_collaboration(
 
         # The fan-out: concurrent deliberation, merged back in agent order.
         # Rule-floor requests above are already in `requests`; these append.
-        for agent, thought in zip(pending, _deliberate_all(pending, outcome.result, intent)):
+        for agent, thought in zip(
+            pending, _deliberate_all(pending, outcome.result, intent, progress)
+        ):
             outcome.deliberations.append(thought)
             if thought.ok:
                 requests.extend(thought.requests)
@@ -435,6 +457,8 @@ def run_with_collaboration(
         outcome.result = execute_plan_sync(validated.plan, turn_id=turn_id)
         outcome.plan = validated.plan
         outcome.requests.extend(accepted)
+        if progress is not None:
+            progress.emit("collaborate", round=round_number, added=len(accepted))
         outcome.notes.extend(
             f"round {round_number}: {request.describe()}" for request in accepted
         )

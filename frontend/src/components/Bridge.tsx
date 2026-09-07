@@ -2,6 +2,7 @@ import { str } from "../i18n/strings";
 import type { Theme } from "../storage";
 import ChartBackdrop from "./ChartBackdrop";
 import Composer from "./Composer";
+import useGlow from "./useGlow";
 import Topbar from "./Topbar";
 import type { TierSettings } from "../api/client";
 import type { FeedState } from "./Topbar";
@@ -39,8 +40,9 @@ const TINTS: Record<string, string> = {
  */
 export default function Bridge({ theme, settings, feed, busy, onSend, onOpenSettings, onToggleTheme, onMenu }: Props) {
   const hero = str.hero;
+  const glow = useGlow<HTMLElement>();
   return (
-    <main className="canvas">
+    <main className="canvas" ref={glow.ref}>
       <ChartBackdrop theme={theme} />
       <Topbar settings={settings} feed={feed} theme={theme} onOpenSettings={onOpenSettings} onToggleTheme={onToggleTheme} onMenu={onMenu} />
 
@@ -61,7 +63,7 @@ export default function Bridge({ theme, settings, feed, busy, onSend, onOpenSett
           <p className="hero-sub">{hero.sub}</p>
         </section>
 
-        <section className="tasks" aria-label="Ready tasks">
+        <section className="tasks" aria-label={str.tasksNav}>
           {str.tasks.map((task, n) => (
             <button
               key={task.id}

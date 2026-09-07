@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import { str } from "../i18n/strings";
 
 /**
  * Demo insurance: if a panel crashes, show the error in place instead of
@@ -27,21 +28,18 @@ export default class ErrorBoundary extends Component<
       <div className="sheet" role="alert">
         <div className="sheet-head">
           <div>
-            <h2>Something broke here</h2>
+            <h2>{str.crash.title}</h2>
             <p>
               {this.props.label}: {error.message || String(error)}
             </p>
           </div>
         </div>
         <div className="sheet-body">
-          <div className="sheet-note">
-            The rest of the app is fine. Close this and keep going -- and tell the team what you
-            clicked.
-          </div>
+          <div className="sheet-note">{str.crash.body}</div>
           {this.props.onClose && (
             <div className="sheet-note">
               <button className="chip" onClick={this.props.onClose}>
-                Close
+                {str.crash.close}
               </button>
             </div>
           )}

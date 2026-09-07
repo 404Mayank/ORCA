@@ -66,7 +66,11 @@ export default function AnswerView({ response, onOpenEvidence, onSend, busy }: P
       )}
 
       {paragraphs.map((p, i) => (
-        <p key={i}>{p}</p>
+        // Reveal, not streaming: this text already passed the number guard
+        // in full. Staggered fade only; instant under reduced motion.
+        <p key={i} className="reveal" style={{ animationDelay: `${Math.min(i * 70, 560)}ms` }}>
+          {p}
+        </p>
       ))}
 
       {(rec?.drivers?.length ?? 0) > 0 && (
@@ -192,7 +196,8 @@ export default function AnswerView({ response, onOpenEvidence, onSend, busy }: P
           {rec!.alternatives!.map((a) => (
             <p className="note" key={a.id}>
               {fill(a.template, a.slots)} (+{a.cost.extra_distance_km} km
-              {a.cost.extra_steam_time_h != null && `, +${a.cost.extra_steam_time_h} h`}
+              {a.cost.extra_steam_time_h != null &&
+                a.cost.extra_steam_time_h > 0 && `, +${a.cost.extra_steam_time_h} h`}
               {a.cost.note && ` — ${a.cost.note}`})
             </p>
           ))}
@@ -245,7 +250,8 @@ export default function AnswerView({ response, onOpenEvidence, onSend, busy }: P
         {response.verified === false && <span>{t.verifyFailed}</span>}
         {response.degraded && <span>{t.degraded}</span>}
         {response.used_fallback_plan && <span>{t.fallbackPlan}</span>}
-        {response.narration_source && <span>{response.narration_source}</span>}
+        {response.narration_source === "llm" && <span>{t.narratedByLlm}</span>}
+        {response.narration_source === "template" && <span>{t.narratedByTemplate}</span>}
         {response.llm_provider && response.llm_provider !== "none" && (
           <span>{response.llm_provider}</span>
         )}
@@ -253,7 +259,11 @@ export default function AnswerView({ response, onOpenEvidence, onSend, busy }: P
       </div>
 
       {response.state === "clarification" && response.missing_slots && response.missing_slots.length > 0 && (
-        <p className="note">{fill(t.needsSlots, { list: response.missing_slots.join(", ") })}</p>
+        <p className="note">
+          {fill(t.needsSlots, {
+            list: response.missing_slots.map((s) => s.replace(/_/g, " ")).join(", "),
+          })}
+        </p>
       )}
       {response.options && response.options.length > 0 && (
         <div className={`options${response.state === "chat" ? " suggest" : ""}`}>

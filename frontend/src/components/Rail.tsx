@@ -1,4 +1,4 @@
-import { str } from "../i18n/strings";
+import { fill, str } from "../i18n/strings";
 import {
   BellIcon,
   BrandMark,
@@ -7,9 +7,10 @@ import {
   HomeIcon,
   NewIcon,
   SavedIcon,
+  StormIcon,
 } from "./icons";
 
-export type RailKey = "bridge" | "new" | "conversations" | "saved" | "alerts" | "settings";
+export type RailKey = "bridge" | "new" | "conversations" | "saved" | "alerts" | "replay" | "settings";
 
 interface Props {
   active: RailKey | null;
@@ -44,7 +45,7 @@ export default function Rail({ active, alertBadge, alertsCached, onNav, open, on
         <div className="brand-sub">{str.meta.appSub}</div>
       </div>
 
-      <nav className="rail-group" aria-label="Workspace">
+      <nav className="rail-group" aria-label={str.workspaceNav}>
         <button
           className="rail-btn"
           aria-current={active === "bridge" ? "page" : undefined}
@@ -82,7 +83,7 @@ export default function Rail({ active, alertBadge, alertsCached, onNav, open, on
           aria-current={active === "alerts" ? "page" : undefined}
           aria-label={
             alertBadge != null && alertBadge > 0
-              ? `${alertBadge} unread alerts`
+              ? fill(r.alertsActive, { n: alertBadge })
               : r.alerts.label
           }
           onClick={() => onNav("alerts")}
@@ -91,7 +92,7 @@ export default function Rail({ active, alertBadge, alertsCached, onNav, open, on
           {alertBadge != null && alertBadge > 0 && <span className="dot">{alertBadge}</span>}
           {alertsCached === false && <span className="dot warn">!</span>}
           <span className="tip">
-            {alertBadge != null && alertBadge > 0 ? `${alertBadge} unread alerts` : r.alerts.tip}
+            {alertBadge != null && alertBadge > 0 ? fill(r.alertsActive, { n: alertBadge }) : r.alerts.tip}
           </span>
         </button>
         {alertBadge != null && alertBadge > 0 && (
@@ -99,6 +100,15 @@ export default function Rail({ active, alertBadge, alertsCached, onNav, open, on
             {alertBadge} {r.alerts.caption}
           </p>
         )}
+        <button
+          className="rail-btn"
+          aria-current={active === "replay" ? "page" : undefined}
+          aria-label={r.replay.label}
+          onClick={() => onNav("replay")}
+        >
+          <StormIcon />
+          <span className="tip">{r.replay.tip}</span>
+        </button>
       </nav>
 
       <div className="rail-group bottom">
