@@ -470,6 +470,7 @@ export default function App() {
             settings={settings}
             feed={feedState}
             busy={busy}
+            trace={trace}
             onSend={(text) => void send(text, { fresh: true })}
             onOpenSettings={() => {
               setSheetReturnFocus(str.rail.settings.label);
@@ -580,13 +581,10 @@ export default function App() {
                       </span>
                       {str.meta.appName}
                     </div>
-                    {trace.length > 0 ? (
-                      <PipelineTrace events={trace} />
-                    ) : (
-                      <div className="answer">
-                        <p>{str.misc.thinking}</p>
-                      </div>
-                    )}
+                    {/* The brewing card covers the zero-event gap itself
+                        (roadmap + elapsed clock), so there is no flat
+                        "thinking" paragraph any more. */}
+                    <PipelineTrace events={trace} />
                   </div>
                 )}
               </div>

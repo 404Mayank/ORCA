@@ -328,6 +328,8 @@ const en = {
       verify: "Verifying every number",
       narrate: "Writing it plainly",
     } as Record<string, string>,
+    brewing: "Brewing",
+    elapsed: "{n}s",
   },
 
   crash: {

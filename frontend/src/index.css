@@ -363,7 +363,6 @@ h1 {
 .answer > p.reveal { animation: rise 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
 @media (prefers-reduced-motion: reduce) {
   .answer > p.reveal { animation: none; }
-  .pipeline-row { animation: none; }
   .hero-wave path { animation: none; stroke-dashoffset: 0; }
   .beacon::after { animation: none; }
   .sheet, .rail.open { animation: none; }
@@ -375,17 +374,24 @@ h1 {
 .composer { position: relative; }
 .composer::before {
   content: ""; position: absolute; inset: 0; border-radius: inherit;
-  background: radial-gradient(
-    240px circle at calc(var(--glow-x, 0.5) * 100%) calc(var(--glow-y, 0.5) * 100%),
-    color-mix(in srgb, var(--teal) 18%, transparent),
-    transparent 70%
-  );
+  background:
+    radial-gradient(
+      240px circle at calc(var(--glow-x, 0.5) * 100%) calc(var(--glow-y, 0.5) * 100%),
+      color-mix(in srgb, var(--teal) 20%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      340px circle at calc((1 - var(--glow-x, 0.5)) * 100%) calc((1 - var(--glow-y, 0.5)) * 100%),
+      color-mix(in srgb, var(--blue) 14%, transparent),
+      transparent 70%
+    );
   opacity: var(--glow-on, 0);
   transition: opacity 0.5s ease;
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .composer::before { display: none; }
+  .composer::before, .canvas::after, .frame::after { display: none; }
+  .frame::before { animation: none; opacity: 0.35; }
 }
 /* Backdrop parallax: transform-only drift following the pointer. */
 #chart {

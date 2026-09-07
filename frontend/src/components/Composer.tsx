@@ -78,7 +78,7 @@ export default function Composer({ placeholder, busy, compact, onSend }: Props) 
         )}
         <button
           type="submit"
-          className="send"
+          className={`send${busy ? " waiting" : ""}`}
           disabled={!sendable}
           aria-label={compact ? c.sendFollowup : c.send}
         >

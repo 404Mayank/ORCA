@@ -1,7 +1,9 @@
 import { str } from "../i18n/strings";
+import type { StreamEvent } from "../api/client";
 import type { Theme } from "../storage";
 import ChartBackdrop from "./ChartBackdrop";
 import Composer from "./Composer";
+import PipelineTrace from "./PipelineTrace";
 import useGlow from "./useGlow";
 import Topbar from "./Topbar";
 import type { TierSettings } from "../api/client";
@@ -20,6 +22,8 @@ interface Props {
   settings: TierSettings | null;
   feed: FeedState;
   busy: boolean;
+  /** Live stream events; the compact brewing card renders from these. */
+  trace: StreamEvent[];
   onSend: (text: string) => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
@@ -38,7 +42,7 @@ const TINTS: Record<string, string> = {
  * layer chips. Every card and chip sends a REAL English query through the
  * same send() path as typed text -- nothing here is a canned answer.
  */
-export default function Bridge({ theme, settings, feed, busy, onSend, onOpenSettings, onToggleTheme, onMenu }: Props) {
+export default function Bridge({ theme, settings, feed, busy, trace, onSend, onOpenSettings, onToggleTheme, onMenu }: Props) {
   const hero = str.hero;
   const glow = useGlow<HTMLElement>();
   return (
@@ -90,12 +94,22 @@ export default function Bridge({ theme, settings, feed, busy, onSend, onOpenSett
           ))}
         </section>
 
-        {busy && (
-          <p className="busy-line" role="status">
-            <span className="beacon" aria-hidden="true" />
-            {str.misc.thinking}
-          </p>
-        )}
+        {busy &&
+          (trace.length > 0 ? (
+            <div className="deck brew-slot">
+              <PipelineTrace events={trace} compact />
+            </div>
+          ) : (
+            <p className="busy-line" role="status">
+              <span className="beacon" aria-hidden="true" />
+              {str.misc.thinking}
+              <span className="dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </p>
+          ))}
         <section className="deck">
           <Composer busy={busy} onSend={onSend} />
         </section>
