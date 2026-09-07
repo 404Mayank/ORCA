@@ -16,13 +16,14 @@ that is the intended trade.
 from __future__ import annotations
 
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 
 from agents.deliberate import strip_numbers
 
-__all__ = ["enabled", "retrieve", "background_for_causal"]
+__all__ = ["background_for_causal", "enabled", "retrieve"]
 
 _TABLE = "rag_docs"
 _SNIPPET_CHARS = 600

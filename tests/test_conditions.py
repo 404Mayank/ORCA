@@ -9,14 +9,14 @@ keyword tier (classify) and the LLM tier (planner gate).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from agents import keyword_intent
-from agents.intent_planner_agent import _finish, _use_fallback, parse_planner_json
+from agents.intent_planner_agent import _finish, parse_planner_json
 from agents.synthesis_agent import build_recommendation
 from core.provenance import ToolCallLog
 from core.schemas.intent import Intent, PlannerOutput, QueryType, SpatialReference
-from core.schemas.tool_io import Provenance, ToolStatus
+from core.schemas.tool_io import Provenance
 from core.units import Range, Unit
 from language.templates.en import render
 from orchestrator.executor import ExecutionResult
@@ -63,7 +63,7 @@ def _result() -> ExecutionResult:
             provenance=prov("open_meteo_marine"),
             tidal_range=Range(min=0.1, max=0.5, unit=Unit.METRE),
             extremes=[TideExtreme(
-                time=datetime(2026, 9, 7, 14, 30, tzinfo=timezone.utc),
+                time=datetime(2026, 9, 7, 14, 30, tzinfo=UTC),
                 height_m=0.42, kind="high",
             )],
             is_limiting=False,
@@ -77,7 +77,7 @@ def _result() -> ExecutionResult:
     for step_id, tool, output in steps:
         record = log.record(
             tool=tool, step_id=step_id, args={},
-            output=output, started_at=datetime.now(timezone.utc), duration_ms=1,
+            output=output, started_at=datetime.now(UTC), duration_ms=1,
         )
         outputs[step_id] = output
         call_ids[step_id] = record.tool_call_id

@@ -80,7 +80,8 @@ def test_corpus_comes_from_cited_in_repo_text_only():
 
 
 def test_migration_creates_guarded_fts_table():
-    sql = open("db/migrations/001_rag.sql", encoding="utf-8").read()
+    with open("db/migrations/001_rag.sql", encoding="utf-8") as handle:
+        sql = handle.read()
     assert "create table if not exists rag_docs" in sql
     assert "create extension if not exists vector" in sql
     assert "using gin" in sql
@@ -88,7 +89,6 @@ def test_migration_creates_guarded_fts_table():
 
 
 def test_background_cannot_smuggle_an_untestable_hypothesis():
-    from datetime import datetime, timezone
 
     from core.provenance import ToolCallLog
     from orchestrator.executor import ExecutionResult
