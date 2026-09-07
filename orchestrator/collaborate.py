@@ -49,6 +49,7 @@ BOUNDS, BECAUSE AN UNBOUNDED AGENT LOOP IS A HANG
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,9 +61,9 @@ from orchestrator.executor import ExecutionResult, execute_plan_sync
 from orchestrator.validate_plan import validate_plan
 
 __all__ = [
+    "MAX_ROUNDS",
     "CollaborationResult",
     "run_with_collaboration",
-    "MAX_ROUNDS",
 ]
 
 #: Review passes after the first execution.
@@ -211,6 +212,22 @@ def _step_for(request: AgentRequest, number: int) -> dict[str, Any]:
     }
 
 
+def _deliberate_all(pending: list, result: ExecutionResult, intent: Intent) -> list[Deliberation]:
+    """One deliberation call per agent, concurrently, in agent order.
+
+    Deliberations are independent -- each agent reads the same finished
+    result and writes only its own Deliberation -- so sequential calls just
+    stack model latencies (measured 2026-09-07: ~6 s per call on the free
+    tier, seconds apart). Threads share nothing mutable here: llm.complete
+    is urllib I/O (GIL released), the registry is read-only on this path.
+    pool.map preserves agent order, so traces read deterministically.
+    """
+    if not pending:
+        return []
+    with ThreadPoolExecutor(max_workers=min(4, len(pending)), thread_name_prefix="orca-deliberate") as pool:
+        return list(pool.map(lambda agent: deliberate(agent, result, intent), pending))
+
+
 def run_with_collaboration(
     plan: Plan,
     intent: Intent,
@@ -243,6 +260,7 @@ def run_with_collaboration(
     for round_number in range(1, MAX_ROUNDS + 1):
         seen = _existing_signatures(raw["steps"])
         requests: list[AgentRequest] = []
+        pending: list = []  # agents to deliberate this round (round 1 only)
 
         for agent in all_agents():
             # 1. The rule floor. Safety-critical requests live here and are not
@@ -267,17 +285,21 @@ def run_with_collaboration(
             ran_something = bool(agent.fragment(outcome.result, intent).step_ids)
 
             if deliberating and round_number == 1 and ran_something:
-                thought = deliberate(agent, outcome.result, intent)
-                outcome.deliberations.append(thought)
-                if thought.ok:
-                    requests.extend(thought.requests)
-                    if thought.assessment:
-                        outcome.notes.append(f"{agent.name} assessed: {thought.assessment}")
-                else:
-                    outcome.notes.append(
-                        f"{agent.name} did not deliberate ({thought.error}); "
-                        "rule-based requests still applied"
-                    )
+                pending.append(agent)
+
+        # The fan-out: concurrent deliberation, merged back in agent order.
+        # Rule-floor requests above are already in `requests`; these append.
+        for agent, thought in zip(pending, _deliberate_all(pending, outcome.result, intent)):
+            outcome.deliberations.append(thought)
+            if thought.ok:
+                requests.extend(thought.requests)
+                if thought.assessment:
+                    outcome.notes.append(f"{agent.name} assessed: {thought.assessment}")
+            else:
+                outcome.notes.append(
+                    f"{agent.name} did not deliberate ({thought.error}); "
+                    "rule-based requests still applied"
+                )
 
         # Critical requests first, so the step budget is spent on them.
         requests.sort(key=lambda r: not r.critical)
