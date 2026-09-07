@@ -1156,13 +1156,28 @@ def _build_conditions(result: ExecutionResult, intent: Intent, turn_id: str) -> 
         ),
         caveats=caveats,
         evidence=_evidence_entries(result),
+        # Filtered, like every other builder -- a bare None here is a
+        # ValidationError that takes the whole answer with it.
+        #
+        # This is why conditions reports failed intermittently on 2026-09-07
+        # with "the data came back but the answer could not be assembled".
+        # `call_id_for("s1")` finds a step *named* s1, which the hardcoded
+        # fallback plan always has and a model-written plan need not: the
+        # model numbers its own steps. So the same question succeeded when the
+        # fallback ran and failed when the planner's own plan did -- the
+        # failures in that session were exactly the turns not marked
+        # "fallback plan".
         visual_layers=[
-            VisualLayer(id="origin", type="point", ref=result.call_id_for("s1"))
-            if result.call_id_for("s1")
-            else None,
-            VisualLayer(id="wave_24h", type="timeseries", ref=wave_id)
-            if wave_id
-            else None,
+            layer
+            for layer in (
+                VisualLayer(id="origin", type="point", ref=result.call_id_for("s1"))
+                if result.call_id_for("s1")
+                else None,
+                VisualLayer(id="wave_24h", type="timeseries", ref=wave_id)
+                if wave_id
+                else None,
+            )
+            if layer is not None
         ],
         reasoning_trace=result.trace,
         degraded=result.degraded,

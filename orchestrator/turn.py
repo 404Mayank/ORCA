@@ -152,6 +152,20 @@ def _plan_from_intent(intent: Intent) -> "PlanningResult":
     """
     from agents.intent_planner_agent import PlanningResult, _force_clarification, _use_fallback
 
+    # The same region gate the model path runs. This is the path that exposed
+    # its absence: a place supplied as an answer to a clarification reached the
+    # executor without anyone checking it was in the box.
+    from agents.intent_planner_agent import outside_box, refuse_out_of_region
+
+    if intent.spatial_reference is not None:
+        away = outside_box(intent.spatial_reference.name)
+        if away is not None:
+            return PlanningResult(
+                output=refuse_out_of_region(intent, *away),
+                attempts=0,
+                notes=[f"{intent.spatial_reference.name} is outside the study area"],
+            )
+
     gaps = intent.blocking_gaps()
     if gaps:
         return PlanningResult(

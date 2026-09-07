@@ -215,3 +215,38 @@ def test_conditions_without_waves_is_an_honest_no_data():
     rec = build_recommendation(result, _intent(), turn_id="t_test")
     assert rec.degraded
     assert "wave forecast" in rec.headline.render()
+
+
+def test_a_conditions_report_survives_a_plan_that_numbers_no_step_s1():
+    """Reported from the UI on 2026-09-07, and intermittent in a way that
+    looked random: "What are the sea conditions at Rameswaram today?" answered
+    correctly on some turns and returned "The data came back but the answer
+    could not be assembled" on others.
+
+    The tell was in the metadata -- every turn that worked was marked
+    "fallback plan". `_build_conditions` put a bare ``None`` into
+    ``visual_layers`` whenever ``call_id_for("s1")`` found nothing, and
+    ``list[VisualLayer]`` rejects None, so pydantic refused the entire
+    recommendation. The hardcoded fallback plan always numbers resolve_place as
+    s1; a model-written plan numbers its own steps and frequently does not.
+
+    Every other builder already filtered None. This one did not, and no test
+    caught it because ``_result()`` above is built with the fallback plan's
+    numbering -- the single numbering under which the bug cannot occur.
+    """
+    result = _result()
+    # The model numbered its steps differently. Nothing is missing; the ids
+    # simply are not the ones the builder guessed at.
+    result.outputs = {f"x{sid[1:]}": out for sid, out in result.outputs.items()}
+    result.call_ids = {f"x{sid[1:]}": cid for sid, cid in result.call_ids.items()}
+    for record in result.tool_call_log.values():
+        if record.step_id:
+            record.step_id = f"x{record.step_id[1:]}"
+
+    assert result.call_id_for("s1") is None, "precondition: no step named s1"
+
+    rec = build_recommendation(result, _intent(), turn_id="t_no_s1")
+
+    assert rec.query_type is QueryType.CONDITIONS_REPORT
+    assert all(layer is not None for layer in rec.visual_layers)
+    assert rec.claims, "the answer must still carry its wave claim"

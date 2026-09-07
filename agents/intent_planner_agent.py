@@ -91,7 +91,7 @@ class PlanningResult:
 
 def _system_prompt() -> str:
     template = PROMPT_PATH.read_text(encoding="utf-8")
-    return template.replace("{TOOLS}", registry.compact_tool_block()).replace(
+    return template.replace("{TOOLS}", registry.compact_tool_block(with_types=True)).replace(
         "{TODAY}", date.today().isoformat()
     )
 
@@ -508,6 +508,56 @@ def _chat_via_llm(
     )
 
 
+def outside_box(place: str | None) -> tuple[float, float] | None:
+    """Coordinates of a *known* place that lies outside the study area, else None.
+
+    **The region test belongs in code, and until 2026-09-07 it existed only in
+    the planner prompt.** The consequence showed up the moment a path skipped
+    the model: asked for conditions and answered "Chennai" to the follow-up,
+    the clarification path called ``_use_fallback`` directly, no LLM saw the
+    turn, nothing checked the latitude, and the run produced "waves 0-0 m,
+    wind 0-0 kn" from grid cells that do not exist. The verifier caught it and
+    refused to show the answer, which is the safety net working -- but a
+    refusal at the end of a wasted turn is not the same as declining at the
+    start of one.
+
+    Chennai sits at 13.08 N; the box stops at 12.0. ``config/bbox.yaml`` labels
+    it exactly that way -- ``note: "north of box, refusal test"`` -- so the
+    case was anticipated and simply never implemented.
+
+    Returns None for an unknown place: the gazetteer cannot adjudicate a name
+    it has never seen, and ``resolve_place`` will ask about it downstream.
+    """
+    if not place:
+        return None
+    from core import config
+
+    box = config.load_yaml("bbox.yaml").get("bbox", {})
+    points = config.load_yaml("bbox.yaml").get("reference_points", {})
+    key = place.strip().lower().replace(" ", "_")
+    point = points.get(key)
+    if not point:
+        return None
+    lat, lon = float(point["lat"]), float(point["lon"])
+    inside = (
+        float(box.get("lat_min", 8.0)) <= lat <= float(box.get("lat_max", 12.0))
+        and float(box.get("lon_min", 78.5)) <= lon <= float(box.get("lon_max", 82.0))
+    )
+    return None if inside else (lat, lon)
+
+
+def refuse_out_of_region(intent: Intent, lat: float, lon: float) -> PlannerOutput:
+    """Decline honestly, naming the place and the limit."""
+    name = intent.spatial_reference.name if intent.spatial_reference else "that location"
+    return _refuse(
+        intent,
+        RefusalReason.OUT_OF_REGION,
+        f"{name} lies outside the area ORCA covers, which runs from Point Calimere "
+        f"up to Cuddalore and south to Rameswaram. There is no forecast or "
+        f"satellite data cached for it, so any answer would be invented.",
+    )
+
+
 def _refuse(intent: Intent, reason: RefusalReason, why: str) -> PlannerOutput:
     return PlannerOutput(
         intent=intent,
@@ -691,6 +741,22 @@ def _finish(
             llm_model=first.model,
             notes=notes,
         )
+
+    # Gate 1c: the place must be inside the box. Code decides this, not the
+    # model -- a prompt instruction is not a boundary check.
+    if intent.spatial_reference is not None:
+        away = outside_box(intent.spatial_reference.name)
+        if away is not None:
+            notes.append(
+                f"{intent.spatial_reference.name} is outside the study area; refused in code"
+            )
+            return PlanningResult(
+                output=refuse_out_of_region(intent, *away),
+                attempts=attempts,
+                llm_provider=first.provider,
+                llm_model=first.model,
+                notes=notes,
+            )
 
     # Gate 1b: the model may not redefine scope. Seen live on 2026-09-04: asked
     # a pfz_locate question, the model found no pfz tool in the catalogue

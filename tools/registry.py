@@ -304,8 +304,21 @@ def planner_tool_block(include_unimplemented: bool = False) -> str:
     return "\n".join(lines).rstrip()
 
 
-def compact_tool_block(exclude_agent: str | None = None) -> str:
+def compact_tool_block(exclude_agent: str | None = None, with_types: bool = False) -> str:
     """A short tool catalogue, for a deliberating domain agent.
+
+    ``with_types`` exists for the planner, and the reason is a bug worth
+    recording. This function was written for deliberating agents and renders
+    argument *names* only -- which is enough to decide whether to ask a peer
+    for something. On 2026-09-07 the planner was switched to it to save ~820
+    tokens against a rate limit, and the docstring below turned out to mean
+    exactly what it says: the planner could no longer see that
+    ``thermal_front.bbox`` is a 4-tuple, emitted ``{"west": ..., "south": ...}``,
+    and every plan was rejected by the validator. Answers stayed correct --
+    the fallback plan ran -- but every turn was flagged degraded.
+
+    Types cost about a sixth of what the full descriptions cost, so the
+    planner gets types and no prose, and the token saving mostly survives.
 
     :func:`planner_tool_block` renders every argument with its description,
     because the planner has to produce a complete, valid call from nothing.
@@ -325,12 +338,26 @@ def compact_tool_block(exclude_agent: str | None = None) -> str:
     for spec in implemented_specs():
         if exclude_agent is not None and spec.agent == exclude_agent:
             continue
-        required = [
-            name for name, info in spec.input_model.model_fields.items() if info.is_required()
-        ]
-        optional = [
-            name for name, info in spec.input_model.model_fields.items() if not info.is_required()
-        ]
+        if with_types:
+            required = [
+                f"{name}: {_type_name(info.annotation)}"
+                for name, info in spec.input_model.model_fields.items()
+                if info.is_required()
+            ]
+            optional = [
+                name
+                for name, info in spec.input_model.model_fields.items()
+                if not info.is_required()
+            ]
+        else:
+            required = [
+                name for name, info in spec.input_model.model_fields.items() if info.is_required()
+            ]
+            optional = [
+                name
+                for name, info in spec.input_model.model_fields.items()
+                if not info.is_required()
+            ]
         args = ", ".join(required)
         if optional:
             args += f" [, {', '.join(optional[:4])}]" if args else f"[{', '.join(optional[:4])}]"
