@@ -15,7 +15,10 @@ interface Props {
   busy?: boolean;
 }
 
-const fmtRange = (r: Range) => `${r.min}–${r.max} ${r.unit}`;
+const fmtRange = (r: Range) =>
+  r.peak != null && r.peak > r.max
+    ? `${r.min}–${r.max} ${r.unit} (${str.thread.tables.gusting} ${r.peak} ${r.unit})`
+    : `${r.min}–${r.max} ${r.unit}`;
 
 function isZoneClaim(c: Claim): boolean {
   const d = Number(c.slots?.["distance_km"]);

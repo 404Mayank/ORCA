@@ -194,6 +194,7 @@ const en = {
       status: "Status",
       withinLimit: "Within limit",
       overLimit: "Over limit",
+      gusting: "gusting",
       zone: "Zone",
       run: "Run",
       bearing: "Bearing",

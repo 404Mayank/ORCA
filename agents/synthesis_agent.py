@@ -252,15 +252,25 @@ def _drivers(result: ExecutionResult, risk, threshold_value: float) -> list[Driv
         if call_id is None:
             continue
         observed = contribution.evaluation.observed
+        # A peak that excursions above the band (a wind gust) is what the
+        # risk function thresholds via Range.worst_case. Displaying only the
+        # sustained band against the limit then reads as a lie ("10.3 kn is
+        # over the 15 kn limit"). The peak is a real tool number
+        # (wind_speed.peak), so it travels in a real slot, never in prose.
+        template = labels.get(contribution.driver_id, "{min}-{max} {unit}")
+        slots: dict = {
+            "min": round(observed.min, 2),
+            "max": round(observed.max, 2),
+            "unit": observed.unit.value,
+        }
+        if observed.peak is not None and observed.peak > observed.max:
+            template += ", gusting {peak} {unit}"
+            slots["peak"] = round(observed.peak, 2)
         drivers.append(
             Driver(
                 id=contribution.driver_id,
-                label_template=labels.get(contribution.driver_id, "{min}-{max} {unit}"),
-                slots={
-                    "min": round(observed.min, 2),
-                    "max": round(observed.max, 2),
-                    "unit": observed.unit.value,
-                },
+                label_template=template,
+                slots=slots,
                 evaluation=contribution.evaluation,
                 at=wave.series[0].time if wave and wave.series else datetime.now(IST),
                 trajectory=trajectory if contribution.driver_id == "significant_wave_height" else None,

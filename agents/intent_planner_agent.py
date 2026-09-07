@@ -229,6 +229,14 @@ def parse_planner_json(text: str, raw_query: str) -> PlannerOutput:
     intent["raw_query"] = raw_query  # ours, never the model's paraphrase
     data["intent"] = intent
 
+    # The model sometimes repeats an option (seen: "kattumaram" twice in a
+    # vessel question). A duplicated button is harmless but sloppy, and a
+    # layout-level dedupe here cannot change what is asked -- only how many
+    # times. Order-preserving: the model's ranking survives.
+    clar = data.get("clarification")
+    if isinstance(clar, dict) and isinstance(clar.get("options"), list):
+        clar["options"] = _dedupe_options(clar["options"])
+
     # Drop null blocks so exactly-one-state validation sees only what is set.
     for key in ("plan", "clarification", "refusal", "chat"):
         if data.get(key) is None:
@@ -321,13 +329,18 @@ def apply_inheritance(intent: Intent, context: Intent | None) -> Intent:
     return intent.model_copy(update=updates)
 
 
+def _dedupe_options(options: list) -> list:
+    """Order-preserving dedupe for clarification buttons."""
+    return list(dict.fromkeys(options))
+
+
 def _force_clarification(intent: Intent, gaps: list[str]) -> PlannerOutput:
     """The governing rule, applied in code: never guess for a safety question."""
     key = tuple(gaps)
     question = _CLARIFICATION_QUESTIONS.get(key) or _CLARIFICATION_QUESTIONS[
         ("spatial_reference", "vessel_class")
     ]
-    options = [v.value for v in VesselClass] if "vessel_class" in gaps else []
+    options = _dedupe_options([v.value for v in VesselClass]) if "vessel_class" in gaps else []
     return PlannerOutput(
         intent=intent.model_copy(update={"missing_slots": gaps}),
         state="clarification",

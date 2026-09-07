@@ -41,6 +41,25 @@ def _driver_sentence(driver) -> str:
     evaluation = driver.evaluation
     threshold = evaluation.threshold
     is_ceiling = threshold.comparison in (Comparison.LTE, Comparison.LT)
+    unit = "" if threshold.unit.value in _SILENT_UNITS else f" {threshold.unit.value}"
+
+    # When a gust peak drove a ceiling breach, the bare "X-Y, over the
+    # limit" sentence is false of the sustained band it prints. Name the
+    # gust explicitly -- the peak is already in the driver's rendered label,
+    # so every digit here is still a checked slot, only the relation is now
+    # true of the numbers shown.
+    observed = evaluation.observed
+    peak = observed.peak
+    if (
+        is_ceiling
+        and evaluation.breaching
+        and peak is not None
+        and peak > observed.max
+    ):
+        return (
+            f"{driver.render()}, with gusts to {peak:g}{unit} "
+            f"over the {threshold.value:g}{unit} limit."
+        )
 
     if is_ceiling:
         state = "over the" if evaluation.breaching else "under the"
@@ -49,7 +68,6 @@ def _driver_sentence(driver) -> str:
         state = "below the" if evaluation.breaching else "above the"
         noun = "minimum"
 
-    unit = "" if threshold.unit.value in _SILENT_UNITS else f" {threshold.unit.value}"
     return f"{driver.render()}, {state} {threshold.value:g}{unit} {noun}."
 
 
