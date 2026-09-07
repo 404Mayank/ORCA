@@ -83,8 +83,13 @@ def tier() -> str:
 
 
 def tier_source() -> str:
-    """Where the active tier came from: "app" (POST /settings) or "env"."""
-    return "app" if _TIER_OVERRIDE in _TIERS else "env"
+    """Where the active tier came from: "app" (POST /settings), "env"
+    (ORCA_TIER is set), or "default" (neither -- the compiled fallback)."""
+    if _TIER_OVERRIDE in _TIERS:
+        return "app"
+    if os.environ.get("ORCA_TIER", "").strip().lower() in _TIERS:
+        return "env"
+    return "default"
 
 
 def set_tier(name: str | None) -> str:
@@ -605,10 +610,9 @@ def complete(role: Role, system: str, user: str) -> LLMResult:
     Tries the primary provider, then the fallback. Returns ``ok=False`` with a
     reason if both fail; the caller owns what happens next.
     """
-    models = _models()
-    tier_chains = _tier_chains()
-    default_order = list(models.get("provider_order") or [models["provider"], models.get("fallback_provider")])
-    order = list(tier_chains.get("order") or default_order) if isinstance(tier_chains, dict) else default_order
+    # Single source for the walk order: GET /settings advertises exactly
+    # this via effective_order(), so the two cannot drift apart.
+    order = effective_order()
     backends = {
         "opencode": _complete_opencode,
         "opencode-go": _complete_opencode_go,

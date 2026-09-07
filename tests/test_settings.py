@@ -49,13 +49,33 @@ def api():
     return TestClient(app)
 
 
-def test_default_tier_is_free_from_env(api, clean_tier):
+def test_default_tier_is_free_from_default(api, clean_tier):
     body = api.get("/settings").json()
     assert body["tier"] == "free"
-    assert body["tier_source"] == "env"
+    assert body["tier_source"] == "default"
     assert body["tiers"] == ["free", "fast", "paid"]
     assert isinstance(body["provider_order"], list) and body["provider_order"]
     assert isinstance(body["providers"], dict)
+
+
+def test_env_tier_reports_env_source(api, clean_tier, monkeypatch):
+    monkeypatch.setenv("ORCA_TIER", "fast")
+    body = api.get("/settings").json()
+    assert body["tier"] == "fast"
+    assert body["tier_source"] == "env"
+
+
+def test_reset_returns_knobs_to_defaults(api, clean_tier):
+    api.post("/settings", json={"max_rounds": 0, "context_ttl_min": 30})
+    assert api.get("/settings").json()["max_rounds"] == 0
+    body = api.post("/settings", json={"reset": ["max_rounds", "context_ttl_min"]}).json()
+    assert body["max_rounds"] == 2
+    assert body["context_ttl_min"] == 90
+
+
+def test_reset_unknown_name_is_422(api, clean_tier):
+    response = api.post("/settings", json={"reset": ["turbo"]})
+    assert response.status_code == 422
 
 
 def test_env_tier_is_honoured(api, clean_tier, monkeypatch):

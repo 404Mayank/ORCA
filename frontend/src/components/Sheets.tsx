@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { SessionTurn, TierSettings } from "../api/client";
 import { fill, str } from "../i18n/strings";
 import type { RecentQuery, SavedAnswer, Theme } from "../storage";
@@ -54,15 +54,47 @@ const fmtTime = (iso: string) => {
  * endpoint, localStorage the user filled, the alerts cache, or POST
  * /settings. A sheet with nothing to show says so instead of decorating.
  */
+export const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export default function Sheets(props: Props) {
   const { sheet, onClose } = props;
   const sh = str.sheets;
+  const sheetRef = useRef<HTMLElement | null>(null);
 
-  // Escape closes. A full focus trap is still open (audit item); this is
-  // the cheap half that unblocks keyboard users today.
+  // Focus in on open; Tab cycles inside while open; Escape closes.
+  useEffect(() => {
+    sheetRef.current?.focus();
+  }, [sheet]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const root = sheetRef.current;
+      if (!root) return;
+      const items = Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (el) => el.offsetParent !== null,
+      );
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && (active === first || !root.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+        // Focus lost to body (unmounted button, newly disabled control):
+        // pull it back in rather than leaking Tab into the background.
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -71,7 +103,13 @@ export default function Sheets(props: Props) {
   return (
     <>
       <div className="sheet-backdrop" onClick={onClose} aria-hidden="true" />
-      <aside className="sheet" role="dialog" aria-label={sh[sheet].title}>
+      <aside
+        ref={sheetRef}
+        tabIndex={-1}
+        className="sheet"
+        role="dialog"
+        aria-label={sh[sheet].title}
+      >
         <div className="sheet-head">
           <div>
             <h2>{sh[sheet].title}</h2>
@@ -235,7 +273,11 @@ function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, on
             <small>{(tierCopy[id] ?? { desc: "" }).desc}</small>
             {settings?.tier === id && (
               <span className="row-meta">
-                {settings.tier_source === "app" ? str.topbar.tierFromApp : str.topbar.tierFromEnv}
+                {settings.tier_source === "app"
+                  ? str.topbar.tierFromApp
+                  : settings.tier_source === "env"
+                    ? str.topbar.tierFromEnv
+                    : str.topbar.tierDefault}
               </span>
             )}
           </button>

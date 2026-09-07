@@ -365,6 +365,8 @@ h1 {
   .answer > p.reveal { animation: none; }
   .pipeline-row { animation: none; }
   .hero-wave path { animation: none; stroke-dashoffset: 0; }
+  .beacon::after { animation: none; }
+  .sheet, .rail.open { animation: none; }
 }
 
 /* ---------- reactive glow ---------- */
@@ -747,3 +749,15 @@ button.sheet-row:hover { background: var(--paper-2); }
   .convo-bar { padding: 12px 14px; }
   .convo-bar .feed { display: none; }
 }
+
+/* ---------- replay panel (appended; reuses .sheet chrome) ---------- */
+.replay-sheet .sheet-body { gap: 8px; }
+.replay-result { display: flex; flex-direction: column; gap: 10px; }
+.replay-event { display: flex; flex-direction: column; gap: 4px; padding: 2px 12px 0; }
+.replay-event b { font-size: 14px; font-weight: 700; letter-spacing: -0.008em; }
+.replay-event .row-meta {
+  font-family: "IBM Plex Mono", monospace; font-size: 9.5px; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.replay-summary { margin: 0; padding: 0 12px; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.replay-why { white-space: normal; min-width: 200px; }

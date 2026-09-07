@@ -17,13 +17,14 @@ import json
 import threading
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from orchestrator.progress import ProgressBus
+from orchestrator.routes.replay import replay_in_progress
 from orchestrator.session import SESSIONS
-from orchestrator.turn import run_turn
+from orchestrator.turn import TurnResult, _next_turn_id, run_turn
 
 router = APIRouter(tags=["chat"])
 
@@ -93,6 +94,23 @@ class ChatResponse(BaseModel):
     recommendation: dict[str, Any] | None = None
 
 
+def _refuse_during_replay() -> None:
+    """503 while a replay owns the process-global cache.
+
+    A replayed 2024 storm served as current conditions would be the exact
+    cache-poisoning mistake PROGRESS.md records -- so live turns fail
+    loudly with a retry hint instead of answering from the wrong ocean.
+    Single-worker deployments only; with --workers N each process replays
+    alone (documented in routes/replay.py).
+    """
+    if replay_in_progress():
+        raise HTTPException(
+            status_code=503,
+            detail="a replay is running; live answers resume when it finishes",
+            headers={"Retry-After": "60"},
+        )
+
+
 def _to_response(result: Any, include_recommendation: bool) -> ChatResponse:
     """One translation from TurnResult to ChatResponse, shared by the
     blocking and streaming routes so they cannot drift apart."""
@@ -131,6 +149,7 @@ def chat(request: ChatRequest) -> ChatResponse:
     because "the venue wifi died" and "I need to know which boat" are both
     things a fisherman should see as sentences, not as an error page.
     """
+    _refuse_during_replay()
     result = run_turn(
         request.query, session_id=request.session_id, language=request.language
     )
@@ -148,6 +167,7 @@ def chat_stream(request: ChatRequest):
     complete ``ChatResponse``. A client that loses the stream mid-flight
     retries with blocking ``POST /chat`` -- no partial answer is ever shown.
     """
+    _refuse_during_replay()
     bus = ProgressBus()
     box: dict[str, object] = {}
 
@@ -160,7 +180,13 @@ def chat_stream(request: ChatRequest):
                 progress=bus,
             )
         except Exception as exc:  # noqa: BLE001 -- run_turn never raises, belt and braces
-            box["error"] = f"{type(exc).__name__}: {exc}"
+            # A real TurnResult, not a hand-shaped dict: the done frame must
+            # validate as ChatResponse exactly like the success path.
+            box["result"] = TurnResult(
+                state="error",
+                answer=f"{type(exc).__name__}: {exc}",
+                turn_id=_next_turn_id(),
+            )
         finally:
             bus.close()
 
@@ -177,10 +203,9 @@ def chat_stream(request: ChatRequest):
                 yield f"event: stage\ndata: {json.dumps(event)}\n\n"
         thread.join(timeout=10.0)
         result = box.get("result")
-        if result is None:
-            payload = {"state": "error", "answer": str(box.get("error", "stream failed"))}
-        else:
-            payload = _to_response(result, request.include_recommendation).model_dump(mode="json")
+        if result is None:  # pragma: no cover -- work() always sets one branch
+            result = TurnResult(state="error", answer="stream failed", turn_id=_next_turn_id())
+        payload = _to_response(result, request.include_recommendation).model_dump(mode="json")
         yield f"event: done\ndata: {json.dumps(payload)}\n\n"
 
     return StreamingResponse(frames(), media_type="text/event-stream")

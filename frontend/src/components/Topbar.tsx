@@ -44,11 +44,13 @@ export default function Topbar({ settings, feed, theme, onOpenSettings, onToggle
   const feedLabel =
     feed === "live" ? t.feedLive : feed === "empty" ? t.feedEmpty : t.feedUnchecked;
   const tierName = settings ? settings.tier : "…";
-  const tierSrc = settings
-    ? settings.tier_source === "app"
+  const tierSrc = !settings
+    ? ""
+    : settings.tier_source === "app"
       ? t.tierFromApp
-      : t.tierFromEnv
-    : "";
+      : settings.tier_source === "env"
+        ? t.tierFromEnv
+        : t.tierDefault;
 
   return (
     <header className="topbar">

@@ -63,7 +63,7 @@ export default function Bridge({ theme, settings, feed, busy, onSend, onOpenSett
           <p className="hero-sub">{hero.sub}</p>
         </section>
 
-        <section className="tasks" aria-label="Ready tasks">
+        <section className="tasks" aria-label={str.tasksNav}>
           {str.tasks.map((task, n) => (
             <button
               key={task.id}

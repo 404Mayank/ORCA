@@ -320,7 +320,9 @@ def run_with_collaboration(
     The model may add requests; it may never remove one the rules produced.
 
     ``deliberating=False`` runs the rules alone -- used by tests, and the
-    automatic behaviour when no provider is reachable.
+    automatic behaviour when no provider is reachable. The parameter is now
+    test-only in production: turn.py never passes it, so the module-global
+    gate (deliberating_enabled, set via POST /settings) is what matters.
 
     Never raises and never returns a worse result than a single execution: if a
     round produces nothing valid, the previous wave's result is what is

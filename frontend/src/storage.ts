@@ -67,6 +67,8 @@ export interface SavedAnswer {
   verified: boolean | null;
   numbers_checked: number;
   narration_source: string;
+  degraded: boolean;
+  duration_ms: number;
 }
 
 export function loadSaved(): SavedAnswer[] {

@@ -63,9 +63,46 @@ can't wait for JS). Desktop + 390px shots read clean, zero console errors.
 - **Mobile shell:** hamburger drawer rail under 820px, sticky
   screen-bottom thread composer, compact fading chips, two-row topbar,
   bridge kbd hint hidden on phones. Verified at 390×844.
-- **Still open from the audit (not built):** `visual_layers` geometry on
-  the map, clarification/refusal/window rendering, promise-driven boot,
-  `missing_slots`/fallback-plan surfacing, sheet focus trap + Escape.
+- **Still open:** route legs on the map (waypoints never reach the
+  recommendation), thread-title drift, focus restore on sheet close,
+  settings reset-all button (API supports `reset`, no UI), vis_km column
+  in replay table, Tamil, MPA/EEZ geometry, INCOIS high-wave feed,
+  scheduled ingest, satellite cache (SST/chlorophyll still missing -
+  CoastWatch SSL fails from here, PFZ/causal stay degraded).
+
+## What landed on 2026-09-07 (later) — replay critique fixes
+
+The replay critiquer returned revise with one high-severity item and
+it was right: the swap hazard was prose-only. Now `/chat` and
+`/chat/stream` 503 (Retry-After 60) while a replay owns the cache --
+loud refusal instead of poisoned answers, covered by test. Also fixed:
+`first_breach` derives from the breach list (never the display string),
+offset-aware `landfall`, warning field in the payload, `step_hours`
+422s out of range, verdict as `str` (a new band degrades, never 500s),
+lock release inside `finally`, busy-then-success + FAILED-nulls +
+summary-None + exact-409 tests. Suite: 423 passed / 11 skipped (the
+Fengal archive un-skipped four). Left as documented: multi-worker
+deployments need single-worker constraint (stated in code + payload).
+
+## What landed on 2026-09-07 (later) — critique fixes, both workers
+
+Two glm critiquers reviewed the workers' output; every confirmed item
+is fixed and live-verified: replay warning + note rendered, IST-pinned
+times (Asia/Kolkata, year included), summary shape guard, focus-in +
+full trap in both sheets (12/12 Tabs stay inside, Escape closes),
+keyboard-scrollable replay table region, clamped overall meter. The
+replay trajectory screenshot shows it all working.
+
+## What landed on 2026-09-07 (later) — replay endpoint
+
+`POST /replay/{event_id}` runs an archived cyclone through the
+production tools and returns the verdict trajectory. Same row-building
+as `scripts/replay.py` (gust peak, breaching drivers first), guarded by
+a process-global lock with 409-on-busy, 404 unknown, 409 + fetch hint
+when the archive is missing. 5 tests (row rules against the real risk
+function, lead-time math, lock/404/409 paths). Fengal archive fetched
+(120 h/layer) and driven live: `no_go` 71.5 h before landfall,
+recovering after passage. Suite: 413 passed / 15 skipped.
 
 ## What landed on 2026-09-07 (later) — live pipeline trace (SSE)
 

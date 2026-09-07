@@ -27,6 +27,7 @@ import PipelineTrace from "./components/PipelineTrace";
 import Composer from "./components/Composer";
 import EvidencePane from "./components/EvidencePane";
 import Rail, { type RailKey } from "./components/Rail";
+import ReplayPanel from "./components/ReplayPanel";
 import SectorMap from "./components/SectorMap";
 import Sheets, { type SheetKey } from "./components/Sheets";
 import type { FeedState } from "./components/Topbar";
@@ -117,18 +118,22 @@ export default function App() {
     // /readiness can no longer be papered over by the ceremony.
     const started = Date.now();
     const steps = str.boot.steps;
+    // Ticks never show the final "ready" label: only the dismiss path may
+    // claim it, and only after both checks actually settled.
+    const lastTick = steps.length - 2;
     let i = 0;
     const tick = setInterval(() => {
       i += 1;
-      setBoot({ pct: Math.min(90, i * 24), label: steps[Math.min(i, steps.length - 1)] });
+      setBoot({ pct: Math.min(90, i * 24), label: steps[Math.min(i, lastTick)] });
     }, 260);
+    const timers: number[] = [];
     const dismiss = () => {
       clearInterval(tick);
       const wait = Math.max(0, 900 - (Date.now() - started));
-      setTimeout(() => {
-        setBoot((b) => (b ? { pct: 100, label: b.label } : b));
-        setTimeout(() => setBoot(null), 350);
-      }, wait);
+      timers.push(window.setTimeout(() => {
+        setBoot({ pct: 100, label: steps[steps.length - 1] });
+        timers.push(window.setTimeout(() => setBoot(null), 350));
+      }, wait));
     };
     let pending = 2;
     const settle = () => {
@@ -148,7 +153,10 @@ export default function App() {
       .then(setSettings)
       .catch(() => setSettings(null))
       .finally(settle);
-    return () => clearInterval(tick);
+    return () => {
+      clearInterval(tick);
+      timers.forEach((t) => window.clearTimeout(t));
+    };
   }, []);
 
   useEffect(() => {
@@ -176,12 +184,18 @@ export default function App() {
       setTurns([]);
     }
     setSheet(null);
+    setReplayOpen(false);
     setView("thread");
     setMessages((m) => [...m, { role: "user", text }]);
     setBusy(true);
     const mine = ++reqId.current;
     setTrace([]);
-    const onEvent = (event: StreamEvent) => setTrace((t) => [...t, event]);
+    // A superseded stream keeps running server-side but must not paint
+    // into the next question's trace. Gate on the live request id.
+    const onEvent = (event: StreamEvent) => {
+      if (reqId.current !== mine) return;
+      setTrace((t) => [...t, event]);
+    };
     const payload = {
       query: text,
       session_id: sessionId.current,
@@ -246,6 +260,7 @@ export default function App() {
     setMapFor(null);
     setTurns([]);
     setSheet(null);
+    setReplayOpen(false);
     setView("bridge");
   }
 
@@ -267,14 +282,21 @@ export default function App() {
     }
   }
 
+  const [replayOpen, setReplayOpen] = useState(false);
+
   function onRail(key: RailKey) {
     setRailOpen(false);
     if (key === "bridge") {
       setSheet(null);
+      setReplayOpen(false);
       setView("bridge");
     } else if (key === "new") {
       newSession();
+    } else if (key === "replay") {
+      setSheet(null);
+      setReplayOpen(true);
     } else {
+      setReplayOpen(false);
       void openSheet(key);
     }
   }
@@ -336,14 +358,14 @@ export default function App() {
       options: [],
       verified: entry.verified ?? null,
       numbers_checked: entry.numbers_checked ?? 0,
-      degraded: false,
+      degraded: entry.degraded ?? false,
       collaboration: [],
       collaboration_rounds: 0,
       agent_reasoning: [],
       narration_source: entry.narration_source ?? "",
+      duration_ms: entry.duration_ms ?? 0,
       llm_provider: "none",
       used_fallback_plan: false,
-      duration_ms: 0,
       notes: [],
       recommendation: entry.recommendation,
     } as unknown as ChatResponse;
@@ -393,6 +415,8 @@ export default function App() {
         verified: lastBot.response.verified ?? null,
         numbers_checked: lastBot.response.numbers_checked ?? 0,
         narration_source: lastBot.response.narration_source ?? "",
+        degraded: lastBot.response.degraded ?? false,
+        duration_ms: lastBot.response.duration_ms ?? 0,
       };
       saveAnswer(entry);
       setSaved(loadSaved());
@@ -415,9 +439,9 @@ export default function App() {
 
       <div className="frame">
         <Rail
-          active={sheet ?? (view === "bridge" ? "bridge" : null)}
+          active={replayOpen ? "replay" : (sheet ?? (view === "bridge" ? "bridge" : null))}
           alertBadge={alertBadge}
-          alertsCached={alertsLayer ? alertsLayer.cached : true}
+          alertsCached={alertsLayer ? alertsLayer.cached : false}
           onNav={onRail}
           open={railOpen}
           onClose={() => setRailOpen(false)}
@@ -561,7 +585,7 @@ export default function App() {
               <ErrorBoundary key={`side-${panel}`} label="side panel" onClose={() => setPanel(null)}>
               <aside className="side">
                 <div className="side-head">
-                  <div className="seg" role="tablist" aria-label="Side panel">
+                  <div className="seg" role="tablist" aria-label={str.sidePanelNav}>
                     <button
                       role="tab"
                       aria-selected={panel === "map"}
@@ -641,6 +665,11 @@ export default function App() {
             onSetTheme={(t) => setTheme(t)}
             layers={status?.layers ?? {}}
           />
+          </ErrorBoundary>
+        )}
+        {replayOpen && (
+          <ErrorBoundary key="replay" label="sheet:replay" onClose={() => setReplayOpen(false)}>
+            <ReplayPanel onClose={() => setReplayOpen(false)} />
           </ErrorBoundary>
         )}
       </div>

@@ -192,6 +192,68 @@ export async function askStream(
   }
 }
 
+export interface ReplayRow {
+  at: string;
+  wave_m: number | null;
+  gust_kn: number | null;
+  vis_km: number | null;
+  score: number;
+  verdict: string;
+  why: string;
+}
+
+export interface ReplayTrajectory {
+  event: string;
+  name: string;
+  place: string;
+  vessel_class: string;
+  landfall: string;
+  authority: string;
+  note: string;
+  replay: boolean;
+  warning?: string;
+  rows: ReplayRow[];
+  summary: {
+    first_no_go: string | null;
+    hours_before_landfall: number | null;
+    first_breach: string | null;
+  };
+}
+
+/** Archived storm ids with a usable on-disk cache. [] when none. */
+export async function fetchReplayList(): Promise<string[]> {
+  const response = await fetch("/replay");
+  if (!response.ok) throw new Error(`replay ${response.status}`);
+  const body: unknown = await response.json();
+  if (!Array.isArray(body) || !body.every((e) => typeof e === "string")) {
+    throw new Error("replay list malformed");
+  }
+  return body;
+}
+
+/** Run one archived storm end to end. Throws with the server's detail. */
+export async function runReplay(eventId: string): Promise<ReplayTrajectory> {
+  const response = await fetch(`/replay/${encodeURIComponent(eventId)}?step_hours=6`, {
+    method: "POST",
+  });
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      body && typeof body === "object" && "detail" in body && typeof body.detail === "string"
+        ? body.detail
+        : `replay ${response.status}`;
+    throw new Error(detail);
+  }
+  if (!body || typeof body !== "object" || !Array.isArray((body as { rows?: unknown }).rows)) {
+    throw new Error("replay trajectory malformed");
+  }
+  const summary = (body as { summary?: unknown }).summary;
+  if (!summary || typeof summary !== "object") {
+    throw new Error("replay trajectory malformed");
+  }
+  return body as ReplayTrajectory;
+}
+
 export interface SessionTurn {
   turn_id: string;
   query: string;

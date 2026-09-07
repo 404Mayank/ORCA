@@ -15,7 +15,7 @@ export default defineConfig({
       "/session": "http://127.0.0.1:8000",
       "/settings": "http://127.0.0.1:8000",
       "/geo": "http://127.0.0.1:8000",
-      "/chat/stream": "http://127.0.0.1:8000",
+      "/replay": "http://127.0.0.1:8000",
     },
   },
 });

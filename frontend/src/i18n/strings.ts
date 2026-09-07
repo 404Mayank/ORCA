@@ -28,8 +28,8 @@ const en = {
   meta: {
     appName: "ORCA",
     appSub: "Marine Intel",
+    documentTitle: "ORCA — Marine Intelligence",
     sector: "South Coromandel sector",
-    sea: "Bay of Bengal",
     datumLine: "Datum WGS-84 · soundings in metres",
     scaleLine: "0 — 25 nm",
     disclaimer: "Advisories are guidance, not clearance. Confirm restricted water with the local marine authorities before sailing.",
@@ -40,20 +40,27 @@ const en = {
     sub: "Marine intelligence, South Coromandel",
   },
 
+  workspaceNav: "Workspace",
+  tasksNav: "Ready tasks",
+  sidePanelNav: "Side panel",
+
   rail: {
     menuOpen: "Open menu",
     menuClose: "Close menu",
+    alertsActive: "{n} advisories in force",
     bridge: { label: "Bridge", tip: "Back to the bridge" },
     newer: { label: "New query", tip: "Start a new conversation" },
     conversations: { label: "Conversations", tip: "This session's questions" },
     saved: { label: "Saved zones", tip: "Answers you kept" },
     alerts: { label: "Alerts", tip: "Advisories in force", caption: "alerts" },
+    replay: { label: "Replay", tip: "Replay an archived cyclone" },
     settings: { label: "Settings", tip: "Tier, appearance, language, data" },
   },
 
   topbar: {
     tierFromEnv: "from .env",
     tierFromApp: "set here",
+    tierDefault: "default",
     tierOpensSettings: "Open settings",
     feedLive: "weather cached",
     feedEmpty: "weather missing",
@@ -161,10 +168,11 @@ const en = {
     unsave: "Saved — tap to remove",
     cited: "Read the {n} layers behind this",
     verified: "✓ {n} numbers verified",
+    narratedByLlm: "AI rewrite, checked",
+    narratedByTemplate: "plain answer",
     fallbackPlan: "fallback plan",
     needsSlots: "Needs: {list}",
     refusalHeading: "Outside our waters",
-    windowAt: "{t}",
     verifyFailed: "✗ verification failed",
     degraded: "degraded",
     agentsReasoned: "Each agent reasoned",
@@ -237,7 +245,6 @@ const en = {
       title: "Conversations",
       sub: "Questions asked in this session, newest last.",
       empty: "Nothing asked yet. The bridge cards are a good first question.",
-      reask: "Ask again",
       newSession: "New session",
     },
     saved: {
@@ -253,7 +260,7 @@ const en = {
       noneChecked: "No advisories in force — checked {at}.",
       unchecked:
         "The alert feed has not been checked in this cache, so safety answers qualify accordingly.",
-      askAbout: "Ask about alerts near a place",
+      askAbout: "Ask about alerts off Nagapattinam",
       askPrompt: "Are there any cyclone or high-wave alerts off Nagapattinam?",
     },
     settings: {
@@ -312,7 +319,6 @@ const en = {
   pipeline: {
     stages: {
       plan: "Reading the question",
-      validate: "Checking the plan",
       execute: "Reading the sea",
       deliberate: "Agents thinking",
       collaborate: "Agents comparing",
@@ -320,7 +326,35 @@ const en = {
       verify: "Verifying every number",
       narrate: "Writing it plainly",
     } as Record<string, string>,
-    fallbackNote: "Live trace unavailable — asked directly.",
+  },
+
+  crash: {
+    title: "Something broke here",
+    body: "The rest of the app is fine. Close this and keep going — and tell the team what you clicked.",
+    close: "Close",
+  },
+
+  replay: {
+    title: "Replay a cyclone",
+    sub: "An archived storm through the live tools. Not live conditions.",
+    empty: "No archived storms on disk. Fetch one first — see the data status section in Settings.",
+    loadError: "Could not load the archive list.",
+    run: "Run",
+    running: "Running the storm…",
+    close: "Close replay",
+    tableLabel: "Replay trajectory table",
+    noGoAgo: "no_go {h} h before landfall",
+    neverRed: "The verdict never reached no_go in this window.",
+    firstBreach: "First breach: {t}",
+    provenance: "Archived observations, {authority}. Computed live, not recorded.",
+    cols: {
+      time: "Time",
+      wave: "Wave m",
+      gust: "Gust kn",
+      score: "Score",
+      verdict: "Verdict",
+      why: "Why",
+    },
   },
 
   misc: {
