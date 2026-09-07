@@ -55,7 +55,7 @@ from typing import Any
 
 from agents.base import AgentRequest, all_agents
 from agents.deliberate import Deliberation, deliberate
-from core.schemas.intent import Intent
+from core.schemas.intent import Intent, QueryType
 from core.schemas.plan import Plan
 from orchestrator.executor import ExecutionResult, execute_plan_sync
 from orchestrator.validate_plan import validate_plan
@@ -284,7 +284,14 @@ def run_with_collaboration(
             # silently rather than asked to comment on an empty result.
             ran_something = bool(agent.fragment(outcome.result, intent).step_ids)
 
-            if deliberating and round_number == 1 and ran_something:
+            # Read-only reports (conditions) carry no verdict and no vessel
+            # gate, so there is no safety-critical request deliberation could
+            # add -- and each deliberation costs a queued model call (measured
+            # 2026-09-07: the deliberation slice dominated turn latency). The
+            # rule floor above still runs; only the LLM fan-out is skipped.
+            # Deliberating agents lose their `assessed:` trace lines on these
+            # turns; that is the trade, stated here rather than discovered.
+            if deliberating and round_number == 1 and ran_something and intent.query_type is not QueryType.CONDITIONS_REPORT:
                 pending.append(agent)
 
         # The fan-out: concurrent deliberation, merged back in agent order.

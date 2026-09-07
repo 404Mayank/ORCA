@@ -333,3 +333,24 @@ def test_deliberations_run_concurrently_in_agent_order(monkeypatch):
     assert [t.agent for t in thoughts] == [a.name for a in pending]
     assert all(t.ok for t in thoughts)
     assert wall < 0.7, f"deliberations ran sequentially ({wall:.2f} s)"
+
+
+def test_conditions_reports_skip_deliberation_but_keep_the_rule_floor(monkeypatch):
+    """Read-only turns skip the LLM fan-out, never the rules.
+
+    A conditions report carries no verdict, so deliberation can add no
+    safety-critical request -- only latency (measured: the dominant slice of
+    a turn). Rule-floor requests still apply, and the answer shape is intact.
+    """
+
+    def _boom(role, system, user):
+        raise AssertionError("deliberation must not run on a read-only turn")
+
+    monkeypatch.setattr("agents.deliberate.llm.complete", _boom)
+    result = _result(("s1", "resolve_place", _place()))
+    outcome = run_with_collaboration(
+        _plan_for(QueryType.CONDITIONS_REPORT), _intent(QueryType.CONDITIONS_REPORT),
+        turn_id="t_x",
+    )
+    assert outcome.deliberations == []
+    assert outcome.result.outputs
