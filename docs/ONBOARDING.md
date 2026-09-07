@@ -9,7 +9,7 @@ skim its dated headers, don't read it linearly.
 
 ```bash
 cd /home/zyrus/Desktop/Projects/ORCA
-git checkout feat/s9-model-tiers   # stacked work lands here; master is stale
+git checkout master   # merged through #13; see docs/HANDOFF.md for state
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"  # add [geo] for geo/gridded tests
 cp .env.example .env               # then fill keys (see §2)

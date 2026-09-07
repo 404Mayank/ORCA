@@ -21,8 +21,8 @@ A calm-day live demo proves nothing — every verdict is `go`. Open on the
 replay, then take a live question:
 
 ```bash
-.venv/bin/python scripts/replay.py              # Fengal: no_go 72 h pre-landfall
-.venv/bin/python scripts/replay.py --event gaja # wind only (archive starts ~2021)
+curl -X POST localhost:8000/replay/fengal  # no_go 71.5 h pre-landfall, via the UI Replay panel
+.venv/bin/python scripts/replay.py         # CLI original (same code path, same table)
 ```
 
 Then live: *"What are the weather and sea conditions near Nagapattinam?"*
@@ -30,13 +30,13 @@ Then live: *"What are the weather and sea conditions near Nagapattinam?"*
 Nagapattinam tomorrow morning?"* (full verdict path). End on the evidence
 drawer: every number, its `tool_call_id`.
 
-## Model tiers (`ORCA_TIER`)
+## Model tiers (`ORCA_TIER`; live-switchable in Settings)
 
-| Tier | Chain | When |
+| Tier | Chain (2026-09-07) | When |
 |---|---|---|
-| `free` (default) | Zen contributor-free Spark → Go cheap (deepseek, glm-flash) | daily use, zero spend |
+| `free` (default) | Zen Spark free pair → Go → groq | daily use, zero spend |
 | `fast` | Go grok-4.6 first | interactive testing |
-| `paid` | Go kimi-k3 → deepseek-pro → grok | demo day, ~12 s turns |
+| `paid` | Go spark contributors → glm-5.3-flash → deepseek-v4-flash | demo day |
 
 Zen has no credits on our key: paid Zen ids 401 (chain walks past them by
 design). Contributor-free ids train on prompts (locations, no PII — accepted,
