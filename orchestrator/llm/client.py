@@ -58,6 +58,7 @@ def provider_status() -> dict[str, bool]:
     """Which providers look usable right now. Cheap; no request is made."""
     return {
         "opencode": bool(os.environ.get("OPENCODE_API_KEY", "").strip()),
+        "opencode-go": bool(os.environ.get("OPENCODE_GO_API_KEY", "").strip()),
         "groq": bool(os.environ.get("GROQ_API_KEY")),
         "anthropic": bool(
             os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")
@@ -67,57 +68,56 @@ def provider_status() -> dict[str, bool]:
 
 
 # --------------------------------------------------------------------------
-# OpenCode Zen -- the unlimited tier
+# OpenCode Zen -- the unlimited tier, plus the Go gateway fallback
 # --------------------------------------------------------------------------
 #
-# Zen is an OpenAI-compatible gateway (https://opencode.ai/docs/zen/). Only
-# the /v1/chat/completions transport is used here -- the models routed to it
-# (kimi, deepseek, glm, minimax) speak plain OpenAI chat completions. The
-# /v1/responses (GPT/Grok) and /v1/messages (Claude) transports have different
-# response shapes and are deliberately NOT called; a non-chat-completions
-# shape is returned as ok=False rather than parsed optimistically.
+# Two gateways, both keyed separately:
 #
-# Model ids verified against the live public roster on 2026-09-07
-# (curl https://opencode.ai/zen/v1/models, no auth needed): kimi-k2.6,
-# deepseek-v4-flash and kimi-k2.5 are all listed. Re-list before a demo --
+# * Zen (`https://opencode.ai/zen/v1`) -- model roster at /v1/models (public,
+#   no auth). Two transports: /v1/chat/completions (deepseek, kimi, glm,
+#   minimax) and /v1/responses (Muse Spark, GPT, Grok families -- OpenAI
+#   Responses API shape, NOT chat completions). /v1/messages (Claude) is not
+#   called; the anthropic provider covers Claude natively.
+# * Go (`https://opencode.ai/zen/go/v1`) -- OpenAI-completions transport only
+#   (deepseek-v4-flash confirmed there). Key in OPENCODE_GO_API_KEY.
+#
+# Model ids verified against the live public roster on 2026-09-07:
+# muse-spark-1.3, muse-spark-1.2, muse-spark-1.3-contributor-free,
+# muse-spark-1.2-contributor-free, deepseek-v4-flash. Re-list before a demo --
 # gateway rosters move, and an unlisted id fails as a quiet fall-through.
 #
+# PRIVACY: *-contributor-free models are free in exchange for training on
+# prompts/completions (Zen docs, Privacy). Fishermen queries carry locations
+# but no PII; the tradeoff is documented here, not hidden. Prefer paid
+# siblings for anything sensitive.
+#
 # Ordering note: `provider_order` lists opencode first, but an unconfigured
-# opencode costs nothing -- a missing/blank key returns ok=False before any
-# socket call, so offline/CI runs fall through instantly. The first-position
-# slot is intentional: when the key IS present this tier is unlimited and
-# should win; when absent the suite behaves exactly as before.
+# provider costs nothing -- a missing/blank key returns ok=False before any
+# socket call, so offline/CI runs fall through instantly.
 
-_ZEN_URL = "https://opencode.ai/zen/v1/chat/completions"
+_ZEN_CHAT_URL = "https://opencode.ai/zen/v1/chat/completions"
+_ZEN_RESPONSES_URL = "https://opencode.ai/zen/v1/responses"
+_ZEN_GO_URL = "https://opencode.ai/zen/go/v1/chat/completions"
+_ZEN_GO_RESPONSES_URL = "https://opencode.ai/zen/go/v1/responses"
+
+#: Model id prefixes served on the Responses transport. Everything else on a
+#: Zen-family gateway uses chat/completions. Prefix routing, not per-model
+#: config, so a renamed model fails loudly as an unexpected shape rather than
+#: silently hitting the wrong endpoint.
+_RESPONSES_PREFIXES = ("muse-spark-", "gpt-", "grok-")
 
 
-def _complete_opencode(role: Role, system: str, user: str) -> LLMResult:
-    key = os.environ.get("OPENCODE_API_KEY", "").strip()
-    if not key:
-        # Fast-fail with no network: every offline run and every existing
-        # test that mocks a later tier passes through here first.
-        return LLMResult(ok=False, provider="opencode", error="OPENCODE_API_KEY not set")
+def _zen_transport(model: str) -> str:
+    """'responses' or 'chat' for a Zen model id."""
+    if model.startswith(_RESPONSES_PREFIXES):
+        return "responses"
+    return "chat"
 
-    try:
-        spec = _models()["opencode"][role]
-        model = spec["model"]
-    except (KeyError, TypeError) as exc:
-        # Config error, not a transient one -- but complete() has no
-        # try/except around backends, so this must return, never raise,
-        # to honour the never-raises contract.
-        return LLMResult(ok=False, provider="opencode", error=f"no model configured for role {role!r}: {exc}")
 
-    body: dict = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": float(spec.get("temperature", 0.2)),
-        "max_completion_tokens": int(spec["max_tokens"]),
-    }
+def _post_json(url: str, key: str, body: dict, provider: str, model: str) -> dict | LLMResult:
+    """POST and parse JSON, or an LLMResult on transport failure."""
     request = urllib.request.Request(
-        _ZEN_URL,
+        url,
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {key}",
@@ -130,50 +130,135 @@ def _complete_opencode(role: Role, system: str, user: str) -> LLMResult:
         with urllib.request.urlopen(
             request, timeout=float(_models()["limits"]["timeout_s"])
         ) as r:
-            payload = json.loads(r.read().decode("utf-8"))
+            return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read()[:300].decode("utf-8", "replace")
-        if exc.code == 429:
-            # Sole key is spent: fall through to the next tier, do not retry
-            # Zen. complete() owns the fallback.
-            return LLMResult(ok=False, provider="opencode", model=model, error=f"rate limited: {detail}")
         if exc.code == 401:
-            return LLMResult(ok=False, provider="opencode", model=model, error="invalid API key")
+            # Key-level: applies to every model on this gateway. Terminal.
+            return LLMResult(ok=False, provider=provider, model=model, error="invalid API key")
         if exc.code == 403:
-            return LLMResult(ok=False, provider="opencode", model=model, error=f"forbidden (key or model access): {detail}")
-        return LLMResult(
-            ok=False, provider="opencode", model=model, error=f"HTTP {exc.code}: {detail}"
-        )
+            return LLMResult(ok=False, provider=provider, model=model, error=f"forbidden (key or model access): {detail}")
+        return LLMResult(ok=False, provider=provider, model=model, error=f"HTTP {exc.code}: {detail}")
     except urllib.error.URLError as exc:
-        return LLMResult(
-            ok=False, provider="opencode", model=model, error=f"connection: {exc.reason}"
-        )
+        return LLMResult(ok=False, provider=provider, model=model, error=f"connection: {exc.reason}")
     except Exception as exc:  # noqa: BLE001
-        return LLMResult(
-            ok=False, provider="opencode", model=model, error=f"{type(exc).__name__}: {exc}"
-        )
+        return LLMResult(ok=False, provider=provider, model=model, error=f"{type(exc).__name__}: {exc}")
 
+
+def _parse_chat(payload: dict, provider: str, model: str) -> LLMResult:
     try:
         choice = payload["choices"][0]
         text = (choice["message"].get("content") or "").strip()
         finish = choice.get("finish_reason")
     except (KeyError, IndexError, TypeError):
-        return LLMResult(ok=False, provider="opencode", model=model, error=f"unexpected response shape: {str(payload)[:200]}")
-
+        return LLMResult(ok=False, provider=provider, model=model, error=f"unexpected response shape: {str(payload)[:200]}")
     if finish == "content_filter":
-        return LLMResult(ok=False, provider="opencode", model=model, error="refused by content filter")
+        return LLMResult(ok=False, provider=provider, model=model, error="refused by content filter")
     if not text:
-        return LLMResult(ok=False, provider="opencode", model=model, error=f"empty response (finish_reason={finish})")
-
+        return LLMResult(ok=False, provider=provider, model=model, error=f"empty response (finish_reason={finish})")
     usage = payload.get("usage") or {}
     return LLMResult(
-        ok=True,
-        text=text,
-        provider="opencode",
-        model=model,
-        input_tokens=usage.get("prompt_tokens"),
-        output_tokens=usage.get("completion_tokens"),
+        ok=True, text=text, provider=provider, model=model,
+        input_tokens=usage.get("prompt_tokens"), output_tokens=usage.get("completion_tokens"),
     )
+
+
+def _parse_responses(payload: dict, provider: str, model: str) -> LLMResult:
+    """OpenAI Responses API shape: output[].content[].output_text.text."""
+    try:
+        parts: list[str] = []
+        for item in payload.get("output", []):
+            if not isinstance(item, dict):
+                continue
+            for block in item.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "output_text":
+                    parts.append(str(block.get("text") or ""))
+        text = "".join(parts).strip()
+    except (AttributeError, TypeError):
+        return LLMResult(ok=False, provider=provider, model=model, error=f"unexpected response shape: {str(payload)[:200]}")
+    if not text:
+        status = payload.get("status")
+        if status and status != "completed":
+            return LLMResult(ok=False, provider=provider, model=model, error=f"responses run {status}")
+        return LLMResult(ok=False, provider=provider, model=model, error=f"unexpected response shape: {str(payload)[:200]}")
+    usage = payload.get("usage") or {}
+    return LLMResult(
+        ok=True, text=text, provider=provider, model=model,
+        input_tokens=usage.get("input_tokens"), output_tokens=usage.get("output_tokens"),
+    )
+
+
+def _complete_opencode(role: Role, system: str, user: str) -> LLMResult:
+    key = os.environ.get("OPENCODE_API_KEY", "").strip()
+    if not key:
+        # Fast-fail with no network: every offline run and every existing
+        # test that mocks a later tier passes through here first.
+        return LLMResult(ok=False, provider="opencode", error="OPENCODE_API_KEY not set")
+    try:
+        models = list(_models()["opencode"]["models"])
+    except (KeyError, TypeError) as exc:
+        return LLMResult(ok=False, provider="opencode", error=f"no model chain configured: {exc}")
+    if not models:
+        return LLMResult(ok=False, provider="opencode", error="no model chain configured")
+    return _complete_chain("opencode", key, models, role, system, user, _ZEN_CHAT_URL, _ZEN_RESPONSES_URL)
+
+
+def _complete_chain(provider, key, models, role, system, user, chat_url, responses_url=None):
+    # One model chain; URL chosen per model id. Never raises.
+    try:
+        params = _models()[provider][role]
+        temperature = float(params.get("temperature", 0.2))
+        max_tokens = int(params["max_tokens"])
+    except (KeyError, TypeError) as exc:
+        return LLMResult(ok=False, provider=provider, error=f"no params configured for role {role!r}: {exc}")
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    last: LLMResult = LLMResult(ok=False, provider=provider, error="no models configured")
+    for pos, model in enumerate(models):
+        if _zen_transport(model) == "responses":
+            url, body, parse = (
+                responses_url,
+                {"model": model, "input": messages, "temperature": temperature, "max_output_tokens": max_tokens},
+                _parse_responses,
+            )
+        else:
+            url, body, parse = (
+                chat_url,
+                {"model": model, "messages": messages, "temperature": temperature, "max_completion_tokens": max_tokens},
+                _parse_chat,
+            )
+        payload = _post_json(url, key, body, provider, model)
+        if isinstance(payload, LLMResult):
+            last = payload
+            # 401 on the FIRST id means the key itself is bad: terminal for
+            # the gateway. 401 on a later id is model-level access (e.g. a
+            # contributor key asking for a paid sibling): the remaining ids
+            # may still serve, so the chain walks on. Found live 2026-09-07.
+            if payload.error == "invalid API key" and pos == 0:
+                break
+            continue
+        last = parse(payload, provider, model)
+        if last.ok:
+            return last
+    return last
+
+
+def _complete_opencode_go(role: Role, system: str, user: str) -> LLMResult:
+    key = os.environ.get("OPENCODE_GO_API_KEY", "").strip()
+    if not key:
+        return LLMResult(ok=False, provider="opencode-go", error="OPENCODE_GO_API_KEY not set")
+    try:
+        models = list(_models()["opencode-go"]["models"])
+    except (KeyError, TypeError) as exc:
+        return LLMResult(ok=False, provider="opencode-go", error=f"no model chain configured: {exc}")
+    if not models:
+        return LLMResult(ok=False, provider="opencode-go", error="no model chain configured")
+    # Go serves both transports (/responses verified live for the spark
+    # contributor ids); URL chosen per model id like Zen.
+    return _complete_chain("opencode-go", key, models, role, system, user, _ZEN_GO_URL, _ZEN_GO_RESPONSES_URL)
+
 
 
 # --------------------------------------------------------------------------
@@ -444,6 +529,7 @@ def complete(role: Role, system: str, user: str) -> LLMResult:
     order = list(models.get("provider_order") or [models["provider"], models.get("fallback_provider")])
     backends = {
         "opencode": _complete_opencode,
+        "opencode-go": _complete_opencode_go,
         "groq": _complete_groq,
         "anthropic": _complete_anthropic,
         "ollama": _complete_ollama,

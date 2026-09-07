@@ -1,10 +1,11 @@
-"""OpenCode Zen provider: fast-fail, fall-through, and shape discipline.
+"""Zen + Go providers: fast-fail, chains, transports, fall-through.
 
-The load-bearing properties, per the plan review:
-- no OPENCODE_API_KEY (or a blank one) returns ok=False with NO socket call,
-  so offline runs and every existing test pass through instantly;
-- a 429 on the sole Zen key falls through to the next tier, never retries Zen;
-- only the /v1/chat/completions shape is parsed; anything else is ok=False.
+Load-bearing properties:
+- no key (either gateway) -> ok=False with NO socket call;
+- per-role model chains tried in order; 429/shape/empty move on, 401 is
+  terminal for the gateway;
+- Muse Spark ids ride /v1/responses, deepseek/glm ride chat/completions;
+- chain exhaustion falls through to the next provider, never raises.
 """
 
 from __future__ import annotations
@@ -16,10 +17,21 @@ import urllib.error
 from orchestrator.llm import client
 
 
-def _payload(text="hello from zen", finish="stop"):
+def _chat_payload(text="hello from zen", finish="stop"):
     return {
         "choices": [{"message": {"content": text}, "finish_reason": finish}],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+
+
+def _responses_payload(text="hello from spark"):
+    return {
+        "status": "completed",
+        "output": [{
+            "type": "message",
+            "content": [{"type": "output_text", "text": text}],
+        }],
+        "usage": {"input_tokens": 12, "output_tokens": 6},
     }
 
 
@@ -37,120 +49,208 @@ class _FakeResponse:
         return False
 
 
-def _http_error(code, body="rate limited"):
-    return urllib.error.HTTPError(
-        "https://opencode.ai/zen/v1/chat/completions",
-        code,
-        "error",
-        {},
-        io.BytesIO(body.encode("utf-8")),
-    )
+def _http_error(code, url="https://example.invalid", body="err"):
+    return urllib.error.HTTPError(url, code, "error", {}, io.BytesIO(body.encode()))
 
 
-def _no_network(monkeypatch):
-    def _boom(*args, **kwargs):
-        raise AssertionError("network call made without a key")
+class _Script:
+    """Scripted urlopen: outcomes in order, requests recorded."""
 
-    monkeypatch.setattr("urllib.request.urlopen", _boom)
+    def __init__(self, *outcomes):
+        self._outcomes = list(outcomes)
+        self.requests = []
+
+    def __call__(self, request, *args, **kwargs):
+        self.requests.append(request)
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _FakeResponse(outcome)
+
+    def bodies(self):
+        return [json.loads(r.data.decode("utf-8")) for r in self.requests]
+
+    def urls(self):
+        return [r.full_url for r in self.requests]
 
 
-def test_missing_key_fast_fails_without_network(monkeypatch):
-    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
-    _no_network(monkeypatch)
-    result = client._complete_opencode("planner", "sys", "user")
-    assert not result.ok
-    assert "not set" in (result.error or "")
+def _no_network(*args, **kwargs):
+    raise AssertionError("network call made without a key")
 
 
-def test_blank_key_fast_fails_without_network(monkeypatch):
+def _env_off(monkeypatch):
+    for var in (
+        "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY", "GROQ_API_KEY",
+        "GROQ_API_KEY_2", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_missing_keys_fast_fail_without_network(monkeypatch):
+    _env_off(monkeypatch)
+    monkeypatch.setattr("urllib.request.urlopen", _no_network)
+    assert client._complete_opencode("planner", "s", "u").error == "OPENCODE_API_KEY not set"
+    assert client._complete_opencode_go("planner", "s", "u").error == "OPENCODE_GO_API_KEY not set"
+
+
+def test_blank_keys_fast_fail(monkeypatch):
+    _env_off(monkeypatch)
     monkeypatch.setenv("OPENCODE_API_KEY", "   ")
-    _no_network(monkeypatch)
-    result = client._complete_opencode("planner", "sys", "user")
-    assert not result.ok
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "  ")
+    monkeypatch.setattr("urllib.request.urlopen", _no_network)
+    assert not client._complete_opencode("planner", "s", "u").ok
+    assert not client._complete_opencode_go("planner", "s", "u").ok
 
 
-def test_ok_path_reports_provider_model_and_usage(monkeypatch):
+def test_transport_routing_by_model_id():
+    assert client._zen_transport("muse-spark-1.3-contributor-free") == "responses"
+    assert client._zen_transport("muse-spark-1.2") == "responses"
+    assert client._zen_transport("deepseek-v4-flash") == "chat"
+    assert client._zen_transport("kimi-k2.6") == "chat"
+
+
+def test_spark_first_id_answers_via_responses(monkeypatch):
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "urllib.request.urlopen", lambda *a, **k: _FakeResponse(_payload())
-    )
+    script = _Script(_responses_payload())
+    monkeypatch.setattr("urllib.request.urlopen", script)
     result = client._complete_opencode("planner", "sys", "user")
     assert result.ok
     assert result.provider == "opencode"
-    assert result.model == "kimi-k2.6"
-    assert result.text == "hello from zen"
-    assert result.input_tokens == 10
-    assert result.output_tokens == 5
+    assert result.model == "muse-spark-1.3-contributor-free"
+    assert result.text == "hello from spark"
+    assert result.input_tokens == 12 and result.output_tokens == 6
+    assert script.urls() == ["https://opencode.ai/zen/v1/responses"]
+    assert script.bodies()[0]["max_output_tokens"] == 4096
 
 
-def test_rate_limit_falls_through_to_groq(monkeypatch):
+def test_chain_falls_to_next_id_with_per_id_transport(monkeypatch):
+    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
+    script = _Script(
+        _http_error(429, "https://opencode.ai/zen/v1/responses"),
+        _responses_payload("via second free"),
+    )
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client._complete_opencode("deliberator", "sys", "user")
+    assert result.ok and result.model == "muse-spark-1.2-contributor-free"
+    assert script.bodies()[0]["model"] == "muse-spark-1.3-contributor-free"
+    assert script.urls() == ["https://opencode.ai/zen/v1/responses"] * 2
+
+
+def test_invalid_key_is_terminal_for_the_gateway(monkeypatch):
+    monkeypatch.setenv("OPENCODE_API_KEY", "bad-key")
+    script = _Script(_http_error(401, body="unauthorized"))
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client._complete_opencode("planner", "sys", "user")
+    assert not result.ok and "invalid API key" in (result.error or "")
+    assert len(script.requests) == 1, "a bad key must not walk the chain"
+
+
+def test_late_401_walks_on(monkeypatch):
+    # A contributor-scoped key 401s on paid siblings but serves free ids.
+    # Found live: only a first-id 401 is terminal. Measured 2026-09-07.
+    monkeypatch.setenv("OPENCODE_API_KEY", "contributor-key")
+    script = _Script(_responses_payload("via free"))
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client._complete_opencode("planner", "sys", "user")
+    assert result.ok and result.model == "muse-spark-1.3-contributor-free"
+
+    calls = []
+
+    _env_off(monkeypatch)
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
+
+    def _mixed(request, *args, **kwargs):
+        calls.append(json.loads(request.data.decode())["model"])
+        if len(calls) == 1:
+            raise _http_error(429)
+        if len(calls) == 2:
+            raise _http_error(401, body="not entitled")
+        if len(calls) == 3:
+            # Wrong transport for a chat id: shape error, walk on.
+            return _FakeResponse(_responses_payload("unreachable"))
+        return _FakeResponse(_chat_payload("via glm"))
+
+    monkeypatch.setattr("urllib.request.urlopen", _mixed)
+    result = client._complete_opencode_go("planner", "sys", "user")
+    # Go chain: paid 1.3 ok? No -- scripted 429 then 401 then... third call
+    # returns a responses payload for deepseek (wrong transport) -> shape
+    # error, then glm ok. Assert the walk, not the shortcut.
+    assert calls[0] == "muse-spark-1.3-contributor"
+    assert result.ok and result.model == "glm-5.3-flash"
+    assert calls == [
+        "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
+        "deepseek-v4-flash", "glm-5.3-flash",
+    ]
+
+
+def test_chain_exhaustion_falls_through_to_groq(monkeypatch):
+    _env_off(monkeypatch)
     monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
     monkeypatch.setenv("GROQ_API_KEY", "groq-key")
-    calls = {"n": 0}
-
-    def _flaky(*args, **kwargs):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise _http_error(429)
-        return _FakeResponse(_payload("via groq"))
-
-    monkeypatch.setattr("urllib.request.urlopen", _flaky)
+    script = _Script(*([_http_error(429)] * 2 + [_chat_payload("via groq")]))
+    monkeypatch.setattr("urllib.request.urlopen", script)
     result = client.complete("deliberator", "sys", "user")
-    assert result.ok
-    assert result.provider == "groq"
-    assert result.text == "via groq"
+    assert result.ok and result.provider == "groq"
+    assert len(script.requests) == 3
 
 
-def test_invalid_key_is_terminal_for_opencode(monkeypatch):
-    monkeypatch.setenv("OPENCODE_API_KEY", "bad-key")
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    monkeypatch.delenv("GROQ_API_KEY_2", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
-
-    def _denied(*args, **kwargs):
-        raise _http_error(401, "unauthorized")
-
-    monkeypatch.setattr("urllib.request.urlopen", _denied)
-    result = client._complete_opencode("planner", "sys", "user")
-    assert not result.ok
-    assert "invalid API key" in (result.error or "")
+def test_go_paid_contributors_ride_responses(monkeypatch):
+    _env_off(monkeypatch)
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
+    script = _Script(_responses_payload("via paid"))
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client._complete_opencode_go("planner", "sys", "user")
+    assert result.ok and result.model == "muse-spark-1.3-contributor"
+    assert script.urls() == ["https://opencode.ai/zen/go/v1/responses"]
+    assert "input" in script.bodies()[0] and "messages" not in script.bodies()[0]
 
 
-def test_empty_response_is_failure(monkeypatch):
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "urllib.request.urlopen", lambda *a, **k: _FakeResponse(_payload(""))
+def test_go_chain_ends_on_glm(monkeypatch):
+    _env_off(monkeypatch)
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "go-key")
+    script = _Script(
+        _http_error(429), _http_error(429), _http_error(429),
+        _chat_payload("via glm"),
     )
-    result = client._complete_opencode("narrator", "sys", "user")
-    assert not result.ok
-    assert "empty response" in (result.error or "")
+    monkeypatch.setattr("urllib.request.urlopen", script)
+    result = client._complete_opencode_go("narrator", "sys", "user")
+    assert result.ok and result.model == "glm-5.3-flash"
+    assert [b["model"] for b in script.bodies()] == [
+        "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
+        "deepseek-v4-flash", "glm-5.3-flash",
+    ]
+    assert script.urls()[:2] == ["https://opencode.ai/zen/go/v1/responses"] * 2
+    assert script.urls()[2:] == ["https://opencode.ai/zen/go/v1/chat/completions"] * 2
 
 
-def test_non_chat_completions_shape_is_rejected(monkeypatch):
-    # A /v1/responses-style body has no choices[0].message: it must fail,
-    # never be parsed optimistically.
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda *a, **k: _FakeResponse({"output": [{"content": "hi"}]}),
-    )
-    result = client._complete_opencode("planner", "sys", "user")
-    assert not result.ok
-    assert "unexpected response shape" in (result.error or "")
+def test_empty_responses_run_is_failure():
+    parsed = client._parse_responses({"status": "incomplete", "output": []}, "opencode", "m")
+    assert not parsed.ok
 
 
-def test_all_three_roles_configured():
+def test_chains_and_roles_configured():
     from core import config
 
     section = config.load_yaml("models.yaml")["opencode"]
+    assert section["models"] == [
+        "muse-spark-1.3-contributor-free", "muse-spark-1.2-contributor-free",
+    ]
     for role in ("planner", "narrator", "deliberator"):
-        assert section[role]["model"], f"opencode.{role} has no model"
         assert int(section[role]["max_tokens"]) > 0
+    go = config.load_yaml("models.yaml")["opencode-go"]
+    assert go["models"] == [
+        "muse-spark-1.3-contributor", "muse-spark-1.2-contributor",
+        "deepseek-v4-flash", "glm-5.3-flash",
+    ]
+    order = config.load_yaml("models.yaml")["provider_order"]
+    assert order.index("opencode") < order.index("opencode-go") < order.index("groq")
 
 
-def test_provider_status_reports_opencode(monkeypatch):
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
-    assert client.provider_status()["opencode"] is True
-    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+def test_provider_status_reports_both_gateways(monkeypatch):
+    _env_off(monkeypatch)
     assert client.provider_status()["opencode"] is False
+    assert client.provider_status()["opencode-go"] is False
+    monkeypatch.setenv("OPENCODE_API_KEY", "k")
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "k2")
+    assert client.provider_status()["opencode"] is True
+    assert client.provider_status()["opencode-go"] is True

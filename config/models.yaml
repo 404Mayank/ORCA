@@ -19,9 +19,10 @@
 # Opencode Zen first because it is the unlimited tier when OPENCODE_API_KEY is
 # set -- and free when it is not: a missing key fast-fails with no socket call
 # (see _complete_opencode), so offline runs and the existing suite behave
-# exactly as before. Groq next as the fast cheap tier, Anthropic if a key
+# exactly as before. Go gateway second (same deal, OPENCODE_GO_API_KEY),
+# Groq next as the fast cheap tier, Anthropic if a key
 # appears, Ollama when the venue loses internet.
-provider_order: [opencode, groq, anthropic, ollama]
+provider_order: [opencode, opencode-go, groq, anthropic, ollama]
 
 # Legacy single-provider fields, still honoured if provider_order is absent.
 provider: groq
@@ -84,24 +85,51 @@ ollama:
     model: "llama3.1:8b"
 
 opencode:
-  # OpenCode Zen gateway, OpenAI-compatible chat completions only.
+  # OpenCode Zen gateway: free Spark ids only (contributor key serves no
+  # paid id here -- verified live 2026-09-07, paid ids 401). Paid and overflow
+  # ids live on opencode-go below. Transport per model id (spark ->
+  # responses, rest -> chat).
   # https://opencode.ai/docs/zen/ -- key in OPENCODE_API_KEY.
-  # Model ids verified against the live public roster on 2026-09-07
+  # Chain ids verified against the live public roster on 2026-09-07
   # (GET https://opencode.ai/zen/v1/models, no auth). Re-list before a demo:
-  # gateway rosters move and an unlisted id fails as a silent fall-through.
+  # gateway rosters move and an unlisted id fails as a silent fall-through
+  # to the next id, then the next provider.
+  #
+  # PRIVACY: *-contributor-free ids train on prompts/completions (Zen docs).
+  # Fine for fishermen queries; prefer paid siblings for anything sensitive.
+  models:
+    - muse-spark-1.3-contributor-free
+    - muse-spark-1.2-contributor-free
   planner:
-    # Strongest reasoning on the chat-completions transport; owns the DAG.
-    model: kimi-k2.6
     temperature: 0.1
     max_tokens: 4096
   narrator:
     # Fluent rewrite of an already-verified object; low temp, short leash.
-    model: kimi-k2.5
     temperature: 0.2
     max_tokens: 1024
   deliberator:
-    # One call per active agent per turn: cheap and fast wins here.
-    model: deepseek-v4-flash
+    # One call per active agent per turn: same free-first chain.
+    temperature: 0.1
+    max_tokens: 700
+
+opencode-go:
+  # Second Zen gateway (https://opencode.ai/zen/go/v1), both transports:
+  # spark contributor (paid) ids ride /responses, the rest chat/completions.
+  # Key in OPENCODE_GO_API_KEY. Chain verified live 2026-09-07 against served
+  # ids (1.3-contributor + 1.2-contributor answer on /responses; deepseek +
+  # glm-flash on chat/completions); quota confirmed on all four.
+  models:
+    - muse-spark-1.3-contributor
+    - muse-spark-1.2-contributor
+    - deepseek-v4-flash
+    - glm-5.3-flash
+  planner:
+    temperature: 0.1
+    max_tokens: 4096
+  narrator:
+    temperature: 0.2
+    max_tokens: 1024
+  deliberator:
     temperature: 0.1
     max_tokens: 700
 
