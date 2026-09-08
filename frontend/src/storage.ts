@@ -6,9 +6,13 @@
  *   so evidence and map still open. Capped so localStorage never overflows.
  */
 
+import type { Locale } from "./i18n/strings";
+export type { Locale };
+
 export type Theme = "light" | "dark";
 
 const THEME_KEY = "orca-theme";
+const LOCALE_KEY = "orca-locale";
 const RECENTS_KEY = "orca-recents";
 const SAVED_KEY = "orca-saved";
 
@@ -25,6 +29,24 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
   try {
     localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* private mode -- the attribute still applies for this visit */
+  }
+}
+
+export function loadLocale(): Locale {
+  try {
+    return localStorage.getItem(LOCALE_KEY) === "ta" ? "ta" : "en";
+  } catch {
+    return "en";
+  }
+}
+
+/** Set <html lang> (drives the Tamil line-height rule) and persist. */
+export function applyLocale(locale: Locale): void {
+  document.documentElement.lang = locale === "ta" ? "ta" : "en";
+  try {
+    localStorage.setItem(LOCALE_KEY, locale);
   } catch {
     /* private mode -- the attribute still applies for this visit */
   }

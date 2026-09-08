@@ -313,7 +313,7 @@ export interface ChatRequest {
   query: string;
   /** Opaque client-chosen id. When supplied, a follow-up inherits the previous turn's place and vessel class -- and every inherited slot is listed in assum */
   session_id?: string | null;
-  /** Phase one is English only. */
+  /** Answer prose is English; any other tag falls back to English with a recorded note (Slice 1: Tamil chrome only). */
   language?: string;
   /** Include the full typed object. Set False for a thin client. */
   include_recommendation?: boolean;

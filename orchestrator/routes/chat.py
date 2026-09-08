@@ -41,7 +41,13 @@ class ChatRequest(BaseModel):
             "slot is listed in assumptions, never applied silently."
         ),
     )
-    language: str = Field(default="en", description="Phase one is English only.")
+    language: str = Field(
+        default="en",
+        description=(
+            "Answer prose is English; any other tag falls back to English "
+            "with a recorded note (Slice 1: Tamil chrome only)."
+        ),
+    )
     include_recommendation: bool = Field(
         default=True,
         description="Include the full typed object. Set False for a thin client.",

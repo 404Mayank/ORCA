@@ -33,15 +33,18 @@ import SectorMap from "./components/SectorMap";
 import Sheets, { type SheetKey } from "./components/Sheets";
 import type { FeedState } from "./components/Topbar";
 import { BackIcon, DocIcon, MapIcon, MenuIcon } from "./components/icons";
-import { fill, str } from "./i18n/strings";
+import { fill, setActiveLocale, str } from "./i18n/strings";
 import {
+  applyLocale,
   applyTheme,
+  loadLocale,
   loadRecents,
   loadSaved,
   loadTheme,
   pushRecent,
   removeSaved,
   saveAnswer,
+  type Locale,
   type RecentQuery,
   type SavedAnswer,
   type Theme,
@@ -78,6 +81,10 @@ function validOrigin(origin: { lat: unknown; lon: unknown } | null | undefined):
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
+  // Locale mirrors theme: persisted preference, applied instantly. The
+  // module binding (`str`) is swapped alongside so every component reads
+  // the active locale on its next render; default is English.
+  const [locale, setLocaleState] = useState<Locale>(() => loadLocale());
   const [view, setView] = useState<"bridge" | "thread">("bridge");
   const [railOpen, setRailOpen] = useState(false);
   const [sheet, setSheet] = useState<SheetKey | null>(null);
@@ -110,6 +117,12 @@ export default function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    applyLocale(locale);
+    setActiveLocale(locale);
+    document.title = str.meta.documentTitle;
+  }, [locale]);
 
   // Boot runs the real checks: cache readiness and tier state. An empty
   // cache is the likeliest demo failure, and this is where it surfaces --
@@ -686,6 +699,11 @@ export default function App() {
             hint={status?.hint ?? null}
             theme={theme}
             onSetTheme={(t) => setTheme(t)}
+            locale={locale}
+            // Swap the strings binding BEFORE setState re-renders: the
+            // effect below also swaps (idempotent), but effects run after
+            // the render pass, which would paint one stale-locale frame.
+            onSetLocale={(l) => { setActiveLocale(l); setLocaleState(l); }}
             layers={status?.layers ?? {}}
           />
           </ErrorBoundary>

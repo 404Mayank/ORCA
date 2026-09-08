@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { SessionTurn, TierSettings } from "../api/client";
 import { fill, str } from "../i18n/strings";
 import type { RecentQuery, SavedAnswer, Theme } from "../storage";
+import type { Locale } from "../i18n/strings";
 import { CloseIcon } from "./icons";
 
 export type SheetKey = "conversations" | "saved" | "alerts" | "settings";
@@ -47,6 +48,8 @@ interface Props {
   onResetKnobs: () => void;
   theme: Theme;
   onSetTheme: (theme: Theme) => void;
+  locale: Locale;
+  onSetLocale: (locale: Locale) => void;
   layers: Record<string, LayerStatus>;
   /** Backend recovery hint (e.g. empty-cache fix). Shown verbatim. */
   hint: string | null;
@@ -289,7 +292,7 @@ function AlertsPane({ alerts, onAskAlerts }: Props) {
 const MEMORY_PRESETS = [30, 90, 180];
 const ROUNDS_PRESETS = [0, 1, 2];
 
-function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, onSetContextTtl, onSetTemplateFallback, onSetMaxRounds, onResetKnobs, theme, onSetTheme, layers, hint }: Props) {
+function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, onSetContextTtl, onSetTemplateFallback, onSetMaxRounds, onResetKnobs, theme, onSetTheme, locale, onSetLocale, layers, hint }: Props) {
   const c = str.sheets.settings;
   const tierCopy = c.tiers;
   return (
@@ -417,13 +420,18 @@ function SettingsPane({ settings, settingsBusy, onSetTier, onSetDeliberating, on
       </div>
 
       <div className="ev-sec">{c.languageHeading}</div>
+      <div className="sheet-note">{c.tamilNote}</div>
       <div style={{ padding: "0 8px 6px", display: "flex", flexDirection: "column", gap: 6 }}>
-        <button className="tier-pick" aria-pressed={true}>
-          <b>{c.english}</b>
-        </button>
-        <button className="tier-pick" disabled={true} title={c.tamil}>
-          <b>{c.tamil}</b>
-        </button>
+        {(["en", "ta"] as Locale[]).map((id) => (
+          <button
+            key={id}
+            className="tier-pick"
+            aria-pressed={locale === id}
+            onClick={() => onSetLocale(id)}
+          >
+            <b>{id === "en" ? c.english : c.tamil}</b>
+          </button>
+        ))}
       </div>
 
       <div className="ev-sec">{c.dataHeading}</div>

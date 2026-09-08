@@ -427,9 +427,17 @@ def run_turn(
     # the user's wait. Both read the same already-verified object, so
     # there is no ordering dependency between them.
     prior_options = SESSIONS.prior_answer_options(session_id)
+    # Slice 1 Tamil is chrome-only (menus, font, switch); answer templates
+    # exist in English alone. An unsupported tag falls back WITH a recorded
+    # note -- silent fallback would read as a Tamil answer that never came,
+    # and no fallback at all raises NotImplementedError out of narrate via
+    # language.render. This pin is load-bearing until templates/ta lands.
+    effective_language = language if language in ("en",) else "en"
+    if effective_language != language:
+        notes.append(f"language {language!r} not supported yet; answered in English")
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
     try:
-        narration_future = pool.submit(narrate, recommendation, language)
+        narration_future = pool.submit(narrate, recommendation, effective_language)
         suggest_future = pool.submit(
             suggest_followups, recommendation, intent, prior_options
         )
