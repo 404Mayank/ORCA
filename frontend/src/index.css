@@ -570,27 +570,50 @@ h1 {
 /* --- the stage spine ------------------------------------------------
    Seven grey checklist rows used to sit above the agent text and win the
    eye every time, which is backwards: the roadmap is fixed and knowable,
-   the conversation is the part worth reading. It is now a segmented track
-   with one lit label. */
-.brew-spine { display: flex; align-items: center; gap: 10px; }
+   the conversation is the part worth reading. So it became a track.
+
+   Unlabelled, though, it was seven anonymous dashes whose meaning lived in
+   a `title` nobody hovers -- an ornamental progress bar. The labels are the
+   pitch made visible: plan, read, think, compare, assemble, verify, write.
+   They are terse because they share one row; the plain-language phrase is
+   still the hover title, and they are dropped entirely on a narrow screen
+   where seven of them cannot fit legibly. */
+.brew-spine { display: flex; align-items: center; }
 .brew-track {
   list-style: none; margin: 0; padding: 0;
   display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
-  gap: 3px; flex: 1; min-width: 0;
+  gap: 4px; flex: 1; min-width: 0;
 }
-.brew-seg {
+.brew-seg { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.brew-bar {
   height: 3px; border-radius: 2px; background: var(--line);
   transition: background 0.3s ease;
 }
-.brew-seg.done { background: color-mix(in srgb, var(--teal) 55%, transparent); }
-.brew-seg.active {
-  background: var(--teal);
-  animation: brew-breathe 1.4s ease-in-out infinite;
+.brew-tick {
+  font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace;
+  font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-3); opacity: 0.55;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color 0.3s ease, opacity 0.3s ease;
 }
-.brew-stage-now {
-  font-size: 11.5px; color: var(--ink-2); font-weight: 600;
-  white-space: nowrap; flex: none;
+.brew-seg.done .brew-bar { background: color-mix(in srgb, var(--teal) 55%, transparent); }
+.brew-seg.done .brew-tick { opacity: 0.8; }
+.brew-seg.active .brew-tick { color: var(--teal); opacity: 1; font-weight: 600; }
+/* The stage in flight. A travelling highlight rather than a fade: the whole
+   card's job is to say work is moving, and something sliding left to right
+   says that at a glance where a pulsing dash reads as idling. */
+.brew-seg.active .brew-bar {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--teal) 30%, transparent) 0%,
+    var(--teal) 45%,
+    var(--blue) 60%,
+    color-mix(in srgb, var(--teal) 30%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: brew-run 1.15s linear infinite;
 }
+@keyframes brew-run { from { background-position: 120% 0; } to { background-position: -120% 0; } }
 @keyframes brew-breathe { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
 
 .brew-head { display: flex; align-items: center; gap: 8px; }
@@ -610,6 +633,16 @@ h1 {
   color: var(--ink-3); background: var(--paper-2);
   transition: border-color 0.2s ease, color 0.2s ease;
 }
+/* Called, but its model call has not come back. The roster arrives in one
+   frame at the start of the round, so without this every chip would appear
+   fully lit while most of those agents were still thinking -- the panel
+   would be claiming conclusions that do not exist yet. */
+.brew-agent.thinking {
+  opacity: 0.5;
+  border-style: dashed;
+  animation: brew-breathe 1.8s ease-in-out infinite;
+}
+.brew-agent.reported { opacity: 1; }
 .brew-agent.active { border-color: var(--teal); color: var(--teal); }
 
 /* --- the room ---------------------------------------------------------
@@ -711,7 +744,8 @@ h1 {
   .dots, .send.waiting { animation: none; display: none; }
   .brew-msg, .brew-ask, .brew-flag { animation: none; }
   .brew-caret { display: none; }
-  .brew-seg.active { animation: none; }
+  .brew-seg.active .brew-bar { animation: none; background: var(--teal); }
+  .brew-agent.thinking { animation: none; }
 }
 
 /* ---------- answer reveal ---------- */
@@ -1225,6 +1259,10 @@ button.sheet-row:hover { background: var(--paper-2); }
   .scroll { padding: 18px 14px 4px; }
   .thread-composer { padding: 10px 14px 14px; }
   .thread-composer .hint { display: none; }
+  /* Seven labels cannot share 320px legibly, and a row of ellipses is worse
+     than no row. The track keeps its shape; the names go back to the title. */
+  .brew-tick { display: none; }
+  .brew-seg { gap: 0; }
   .bubble { max-width: 94%; }
   .convo-bar { padding: 12px 14px; }
   .convo-bar .feed { display: none; }

@@ -15,6 +15,13 @@ import type { StreamEvent } from "../api/client";
  * No percentages, no ETA, no invented activity. The only live number is the
  * client-side elapsed clock, which measures the wait rather than the system.
  *
+ * Two of the frames carry `phase: "start"` (see orchestrator/progress.py):
+ * the planner announcing itself, and the deliberation round announcing its
+ * roster. They are what killed the dead air this panel used to open with --
+ * several seconds of "Queued / waiting for the first agent" while an LLM call
+ * ran. They light the stage and the agent chips; they never add a line to the
+ * conversation, because a start frame carries no conclusion to show.
+ *
  * Why a conversation rather than a checklist: the headline claim of this
  * project is that several agents reason and ask each other for things. A
  * seven-row checklist of grey labels proves none of that -- it is a spinner
@@ -112,10 +119,12 @@ export default function PipelineTrace({ events, compact }: Props) {
 
   const last = events.length > 0 ? events[events.length - 1] : null;
   // "done" means the turn finished; treat every stage as completed. With
-  // ZERO events (planner still queued) the honest state is every stage
-  // pending: nothing has happened yet.
+  // ZERO events the honest state is every stage pending -- but that window is
+  // now a few milliseconds wide rather than the length of a planner call,
+  // because the planner emits a start frame before it runs.
   const lastStage = last ? (last.stage === "done" ? "narrate" : last.stage) : null;
   const lastIdx = lastStage ? ROADMAP.indexOf(lastStage as (typeof ROADMAP)[number]) : -1;
+  const finished = last?.stage === "done";
 
   const { lines, agents } = useMemo(() => {
     const out: Line[] = [];
@@ -127,6 +136,16 @@ export default function PipelineTrace({ events, compact }: Props) {
     const askAt = new Map<string, number>();
     events.forEach((e, i) => {
       if (e.stage === "deliberate") {
+        // The roster frame: these agents were called, none has answered yet.
+        // Registering them here is what makes the chips appear at the start
+        // of the round instead of one at a time as each model call returns.
+        if (e.phase === "start") {
+          const roster = Array.isArray(e.agents) ? e.agents : [];
+          roster.forEach((a) => {
+            if (typeof a === "string" && a && !seen.includes(a)) seen.push(a);
+          });
+          return;
+        }
         const agent = typeof e.agent === "string" ? e.agent : "";
         if (!agent) return;
         if (!seen.includes(agent)) seen.push(agent);
@@ -205,6 +224,31 @@ export default function PipelineTrace({ events, compact }: Props) {
   const activeAgent =
     last?.stage === "deliberate" && typeof last.agent === "string" ? last.agent : null;
 
+  // A chip is "reported" once that agent's own deliberation frame has landed.
+  // Until then it is a name on the roster: called, still thinking. Showing
+  // the difference is the honest version of announcing the roster early.
+  const reported = useMemo(
+    () =>
+      new Set(
+        events
+          .filter((e) => e.stage === "deliberate" && e.phase !== "start")
+          .map((e) => (typeof e.agent === "string" ? e.agent : ""))
+          .filter(Boolean),
+      ),
+    [events],
+  );
+
+  // The empty room, before any agent has spoken. Each line states the stage
+  // the backend last reported -- never a guess about what comes next.
+  const emptyLine =
+    lastIdx < 0
+      ? str.pipeline.queued
+      : lastStage === "plan"
+        ? str.pipeline.planning
+        : lastStage === "execute"
+          ? str.pipeline.reading
+          : str.pipeline.listening;
+
   return (
     <div className={`brew${compact ? " compact" : ""}`} role="status" aria-live="polite">
       <div className="brew-head">
@@ -213,7 +257,12 @@ export default function PipelineTrace({ events, compact }: Props) {
         {agents.length > 0 && (
           <span className="brew-agents">
             {agents.map((a) => (
-              <span key={a} className={`brew-agent${a === activeAgent ? " active" : ""}`}>
+              <span
+                key={a}
+                className={`brew-agent${reported.has(a) ? " reported" : " thinking"}${
+                  a === activeAgent ? " active" : ""
+                }`}
+              >
                 {short(a)}
               </span>
             ))}
@@ -222,29 +271,39 @@ export default function PipelineTrace({ events, compact }: Props) {
         <span className="brew-elapsed">{fill(str.pipeline.elapsed, { n: String(elapsed) })}</span>
       </div>
 
-      {/* The roadmap, as a spine rather than a checklist: one lit label and
-          a segmented track, so seven grey rows stop competing with the
-          conversation for attention. */}
+      {/* The roadmap, as a track rather than a checklist: seven grey rows used
+          to sit above the agent text and win the eye every time, which is
+          backwards -- the roadmap is fixed and knowable, the conversation is
+          the part worth reading.
+
+          It is labelled now. Unlabelled it was seven anonymous dashes whose
+          meaning lived in a hover title nobody hovers, which made the whole
+          strip read as an ornamental progress bar; the labels are what say
+          "this system plans, then reads, then argues, then checks its own
+          numbers". Short forms, because they share one row -- the plain-
+          language phrase stays as the title. */}
       <div className="brew-spine">
         <ol className="brew-track">
-          {ROADMAP.map((stage, i) => (
-            <li
-              key={stage}
-              className={`brew-seg${i < lastIdx ? " done" : i === lastIdx ? " active" : " todo"}`}
-              title={str.pipeline.stages[stage] ?? stage}
-            />
-          ))}
+          {ROADMAP.map((stage, i) => {
+            const state =
+              finished || i < lastIdx ? "done" : i === lastIdx ? "active" : "todo";
+            return (
+              <li
+                key={stage}
+                className={`brew-seg ${state}`}
+                title={str.pipeline.stages[stage] ?? stage}
+              >
+                <span className="brew-bar" aria-hidden="true" />
+                <span className="brew-tick">{str.pipeline.ticks[stage] ?? stage}</span>
+              </li>
+            );
+          })}
         </ol>
-        <span className="brew-stage-now">
-          {lastIdx >= 0
-            ? (str.pipeline.stages[ROADMAP[lastIdx]] ?? ROADMAP[lastIdx])
-            : str.pipeline.queued}
-        </span>
       </div>
 
       <div className="brew-room" ref={tail}>
         {lines.length === 0 ? (
-          <p className="brew-empty">{str.pipeline.listening}</p>
+          <p className="brew-empty">{emptyLine}</p>
         ) : (
           lines.map((line, i) => {
             const newest = i === lines.length - 1;

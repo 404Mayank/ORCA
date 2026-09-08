@@ -345,9 +345,25 @@ const en = {
       verify: "Verifying every number",
       narrate: "Writing it plainly",
     } as Record<string, string>,
+    /* Short forms for the roadmap track itself, where seven labels share one
+       row. The long phrases above stay as the hover title. */
+    ticks: {
+      plan: "Plan",
+      execute: "Read",
+      deliberate: "Think",
+      collaborate: "Compare",
+      synthesise: "Assemble",
+      verify: "Verify",
+      narrate: "Write",
+    } as Record<string, string>,
     brewing: "Working",
     elapsed: "{n}s",
     queued: "Queued",
+    /* What the room says before any agent has spoken. One line per stage the
+       wait can actually be in -- each is a fact the backend reported, not a
+       guess about what is happening. */
+    planning: "Reading your question and choosing which agents to call.",
+    reading: "Running the tools the plan asked for.",
     listening: "Waiting for the first agent to report.",
     byRules: "rules",
     required: "required check",
@@ -728,9 +744,20 @@ export const ta: Strings = {
       verify: "\u0b92\u0bb5\u0bcd\u0bb5\u0bca\u0bb0\u0bc1 \u0b8e\u0ba3\u0bcd\u0ba3\u0bc8\u0baf\u0bc1\u0bae\u0bcd \u0b9a\u0bb0\u0bbf\u0baa\u0bbe\u0bb0\u0bcd\u0b95\u0bcd\u0b95\u0bbf\u0bb1\u0ba4\u0bc1",
       narrate: "\u0b8e\u0bb3\u0bbf\u0ba4\u0bbe\u0b95 \u0b8e\u0bb4\u0bc1\u0ba4\u0bc1\u0b95\u0bbf\u0bb1\u0ba4\u0bc1",
     } as Record<string, string>,
+    ticks: {
+      plan: "\u0ba4\u0bbf\u0b9f\u0bcd\u0b9f\u0bae\u0bcd",
+      execute: "\u0baa\u0b9f\u0bbf",
+      deliberate: "\u0b9a\u0bbf\u0ba8\u0bcd\u0ba4\u0bbf",
+      collaborate: "\u0b92\u0baa\u0bcd\u0baa\u0bbf\u0b9f\u0bc1",
+      synthesise: "\u0ba4\u0bca\u0b95\u0bc1",
+      verify: "\u0b9a\u0bb0\u0bbf\u0baa\u0bbe\u0bb0\u0bcd",
+      narrate: "\u0b8e\u0bb4\u0bc1\u0ba4\u0bc1",
+    } as Record<string, string>,
     brewing: "\u0bb5\u0bc7\u0bb2\u0bc8\u0baf\u0bbf\u0bb2\u0bcd",
     elapsed: "{n} \u0bb5\u0bbf",
     queued: "\u0bb5\u0bb0\u0bbf\u0b9a\u0bc8\u0baf\u0bbf\u0bb2\u0bcd",
+    planning: "\u0b95\u0bc7\u0bb3\u0bcd\u0bb5\u0bbf\u0baf\u0bc8\u0baa\u0bcd \u0baa\u0b9f\u0bbf\u0ba4\u0bcd\u0ba4\u0bc1, \u0b8e\u0ba8\u0bcd\u0ba4 \u0bae\u0bc1\u0b95\u0bb5\u0bb0\u0bcd\u0b95\u0bb3\u0bcd \u0ba4\u0bc7\u0bb5\u0bc8 \u0b8e\u0ba9\u0bcd\u0baa\u0ba4\u0bc8\u0ba4\u0bcd \u0ba4\u0bc7\u0bb0\u0bcd\u0b95\u0bbf\u0bb1\u0ba4\u0bc1.",
+    reading: "\u0ba4\u0bbf\u0b9f\u0bcd\u0b9f\u0bae\u0bcd \u0b95\u0bc7\u0b9f\u0bcd\u0b9f \u0b95\u0bb0\u0bc1\u0bb5\u0bbf\u0b95\u0bb3\u0bcd \u0b87\u0baf\u0b99\u0bcd\u0b95\u0bc1\u0b95\u0bbf\u0ba9\u0bcd\u0bb1\u0ba9.",
     listening: "\u0bae\u0bc1\u0ba4\u0bb2\u0bcd \u0bae\u0bc1\u0b95\u0bb5\u0bb0\u0bbf\u0ba9\u0bcd \u0b85\u0bb1\u0bbf\u0b95\u0bcd\u0b95\u0bc8\u0b95\u0bcd\u0b95\u0bc1\u0b95\u0bcd \u0b95\u0bbe\u0ba4\u0bcd\u0ba4\u0bbf\u0bb0\u0bc1\u0b95\u0bcd\u0b95\u0bbf\u0bb1\u0ba4\u0bc1.",
     byRules: "\u0bb5\u0bbf\u0ba4\u0bbf\u0b95\u0bb3\u0bcd",
     required: "\u0b95\u0b9f\u0bcd\u0b9f\u0bbe\u0baf\u0b9a\u0bcd \u0b9a\u0bcb\u0ba4\u0ba9\u0bc8",

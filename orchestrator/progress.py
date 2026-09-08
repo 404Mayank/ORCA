@@ -33,6 +33,20 @@ STAGES = (
 )
 
 
+#: Optional ``phase`` on an event. Absent means the stage completed, which is
+#: what every event meant before this field existed and still means for the
+#: stages that emit once.
+#:
+#: ``"start"`` is for the two stages that wrap a model call long enough to
+#: look like a hang: the planner, and the parallel deliberation round. It says
+#: only that the work began, and it carries no conclusions -- the planner's
+#: start frame has no ``query_type``, the deliberation's has no assessments.
+#: That distinction is the whole reason a phase field is safe: reporting that
+#: something is running is an observation, reporting what it found before it
+#: has finished would be invention.
+PHASES = ("start", "end")
+
+
 class ProgressBus:
     """Thread-safe event queue. One per streaming turn, never shared."""
 

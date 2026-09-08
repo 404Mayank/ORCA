@@ -290,6 +290,14 @@ def _deliberate_all(
     """
     if not pending:
         return []
+    # Who is about to think, before any of them has finished. Same reasoning
+    # as the planner's start frame in turn.py: these agents are running, and
+    # a client that hears nothing until the first one returns has to show an
+    # empty room for the length of a model call. The roster is a fact about
+    # the plan, not a prediction -- `pending` is exactly who gets called.
+    # It carries no conclusions, because none exist yet.
+    if progress is not None:
+        progress.emit("deliberate", phase="start", agents=[a.name for a in pending])
     with ThreadPoolExecutor(max_workers=min(4, len(pending)), thread_name_prefix="orca-deliberate") as pool:
         thoughts = list(pool.map(lambda agent: deliberate(agent, result, intent), pending))
     # One event per finished deliberation. Every string here is written by a

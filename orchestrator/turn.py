@@ -213,6 +213,22 @@ def run_turn(
     pending = SESSIONS.pending_question(session_id)
     merged = _answer_to_clarification(query, pending) if pending else None
 
+    def emit(stage: str, **detail: object) -> None:
+        # Validation observably happened iff a plan exists (Gate 2 runs
+        # inside plan_query), so it rides on the plan event rather than as
+        # its own -- a separate validate event from here would be invented.
+        if progress is not None:
+            progress.emit(stage, **detail)
+
+    # The planner is an LLM call, and until now nothing was reported until it
+    # came back: several seconds in which a streaming client had literally no
+    # event and could only show "queued". That silence was an artefact of the
+    # bus reporting completions only, not a fact about the system -- the
+    # planner is demonstrably running. Saying so is not invented progress;
+    # claiming a result would be, which is why the start frame carries no
+    # query_type. It is upgraded by the end frame below.
+    emit("plan", phase="start")
+
     if merged is not None:
         planning = _plan_from_intent(merged)
     else:
@@ -226,15 +242,9 @@ def run_turn(
     intent = planning.output.intent
     notes = list(planning.notes)
 
-    def emit(stage: str, **detail: object) -> None:
-        # Validation observably happened iff a plan exists (Gate 2 runs
-        # inside plan_query), so it rides on the plan event rather than as
-        # its own -- a separate validate event from here would be invented.
-        if progress is not None:
-            progress.emit(stage, **detail)
-
     emit(
         "plan",
+        phase="end",
         query_type=getattr(getattr(intent, "query_type", None), "value", "unknown"),
         fallback=bool(planning.used_fallback),
     )

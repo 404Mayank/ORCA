@@ -139,7 +139,9 @@ def test_deliberate_frames_expose_the_agent_conversation(api):
         pytest.skip("needs a working weather cache; run scripts/refresh_cache.py --weather")
     stages, _ = _stream(api, SAFETY_QUERY, "s_stream_convo")
 
-    deliberations = [e for e in stages if e["stage"] == "deliberate"]
+    deliberations = [
+        e for e in stages if e["stage"] == "deliberate" and e.get("phase") != "start"
+    ]
     assert deliberations, "no agent deliberated; the panel would have nothing to show"
     for event in deliberations:
         assert isinstance(event.get("agent"), str) and event["agent"]
@@ -158,6 +160,57 @@ def test_deliberate_frames_expose_the_agent_conversation(api):
         for request in requests:
             assert set(request) == {"from_agent", "to_agent", "tool", "reason", "critical"}
             assert isinstance(request["critical"], bool)
+
+
+def test_start_frames_announce_work_without_claiming_results(api):
+    """The two long stages report that they began, and nothing more.
+
+    Both wrap a model call several seconds long. Before they announced a
+    start, a streaming client had no event at all for that whole window and
+    could only render "queued" -- silence that was an artefact of the bus
+    reporting completions, not a fact about the system.
+
+    The line that keeps this honest: a start frame says work is *running*
+    and carries no finding. The planner's start frame has no query_type; the
+    deliberation's has a roster and no assessments. Asserting their absence
+    is the point of this test -- a start frame that grew a conclusion would
+    be inventing progress, which is what progress.py exists to prevent.
+    """
+    blocking = api.post("/chat", json={"query": SAFETY_QUERY, "session_id": "s_phase_probe"})
+    if blocking.json()["state"] != "answer":
+        pytest.skip("needs a working weather cache; run scripts/refresh_cache.py --weather")
+    stages, _ = _stream(api, SAFETY_QUERY, "s_stream_phase")
+
+    plan_start = [e for e in stages if e["stage"] == "plan" and e.get("phase") == "start"]
+    assert len(plan_start) == 1, "the planner must announce itself exactly once"
+    assert "query_type" not in plan_start[0], "a start frame must not carry a result"
+    assert "fallback" not in plan_start[0]
+
+    plan_end = [e for e in stages if e["stage"] == "plan" and e.get("phase") == "end"]
+    assert len(plan_end) == 1
+    assert plan_end[0].get("query_type")
+
+    # The start frame must precede its own completion, or it is telling the
+    # client about a stage that already finished.
+    assert plan_start[0]["seq"] < plan_end[0]["seq"]
+
+    delib_start = [e for e in stages if e["stage"] == "deliberate" and e.get("phase") == "start"]
+    for event in delib_start:
+        roster = event.get("agents")
+        assert isinstance(roster, list) and roster
+        assert all(isinstance(a, str) and a for a in roster)
+        for banned in ("assessment", "concerns", "asks", "rejected", "agent"):
+            assert banned not in event, f"start frame leaked {banned}"
+        finished = [
+            e["agent"]
+            for e in stages
+            if e["stage"] == "deliberate"
+            and e.get("phase") != "start"
+            and e["seq"] > event["seq"]
+        ]
+        # Everyone announced is someone who was actually called, so the chips
+        # the panel lights up are never for an agent that never ran.
+        assert set(roster) <= set(finished) or not finished
 
 
 def test_stream_done_matches_blocking(api):
