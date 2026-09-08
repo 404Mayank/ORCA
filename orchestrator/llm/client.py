@@ -78,8 +78,8 @@ def tier() -> str:
     """Active model tier: the app override when set, else ORCA_TIER."""
     if _TIER_OVERRIDE in _TIERS:
         return _TIER_OVERRIDE
-    name = os.environ.get("ORCA_TIER", "free").strip().lower()
-    return name if name in _TIERS else "free"
+    name = os.environ.get("ORCA_TIER", "paid").strip().lower()
+    return name if name in _TIERS else "paid"
 
 
 def tier_source() -> str:

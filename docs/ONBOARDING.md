@@ -36,7 +36,7 @@ ignored). Consequences, both learned the hard way:
   after importing anything from `core` (which triggers the load).
 
 Keys in play: `OPENCODE_API_KEY` (Zen), `OPENCODE_GO_API_KEY` (Go gateway),
-`GROQ_API_KEY` (fallback), `ORCA_TIER` = `free|fast|paid` (default `free`),
+`GROQ_API_KEY` (fallback), `ORCA_TIER` = `free|fast|paid` (default `paid`),
 `SUPABASE_*` (RAG store only), `COPERNICUS_*` (unused; CoastWatch covers us).
 
 ## 3. Run it

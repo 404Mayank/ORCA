@@ -3,6 +3,12 @@
 One line each: decision, date, rationale. New entries go on top with a date.
 Reversing one requires updating the code it cites, not just this file.
 
+- **2026-09-08 — Default tier is paid (strongest).** Restarts kept
+  landing on the quota-thin free chain; the compiled fallback is now
+  paid, and this machine pins `ORCA_TIER=paid`. Fresh clones with no
+  keys behave identically (all providers fast-fail to template).
+  (`orchestrator/llm/client.py`)
+
 - **2026-09-08 — Shelter-only routing; zero-length legs fail.** Shelter
   resolves to the origin gazetteer point for shore queries, so a same-cell
   leg is FAILED, not a single-point line. Lines on the map need
