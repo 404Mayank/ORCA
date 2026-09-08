@@ -17,8 +17,12 @@
      white panel has nowhere to hide -- the same alpha that reads as a hint
      over deep navy reads as a stain over paper, and it lands right on the
      hint row. Halved for light rather than retuned per gradient, so the two
-     themes stay one effect. */
-  --wash: 0.46;
+     themes stay one effect.
+
+     Raised from 0.46 when the outward bloom was removed: that surface was
+     the one spilling onto the paper, and this one is clipped to the panel,
+     so light can carry more of it before the hint row suffers. */
+  --wash: 0.66;
   --shell: #ccd8da;
   /* Deepened from #ebf0f0. White cards on a near-white ground separated by
      about six per cent of value, so they relied entirely on a shadow that
@@ -723,12 +727,11 @@ h1 {
 
 /* ---------- reactive glow ---------- */
 /* The composer's light.
-   Soft colour that drifts, breathes and leaks -- outward onto the page and
-   inward across the panel's own surface -- rather than a ring drawn on the
-   border. The previous attempt masked a conic gradient down to the border
-   and read as a hard rainbow outline: it moved, but it was an *edge*, not a
-   light source. Before that it was a pair of radial washes that never moved
-   at all.
+   Soft colour that drifts and breathes **inside** the panel. It is a light
+   under the glass, not a halo around it: there used to be a second surface
+   blooming 26px past the edges, and it made the box look like it was leaking
+   onto the page. Everything now lives within the border radius, and
+   `overflow: hidden` on the panel is the hard guarantee of that.
 
    The shape of the effect:
 
@@ -740,13 +743,26 @@ h1 {
      110%, x pinned to the flanks. That is the readability rule expressed
      geometrically: colour gathers in the corners and along the top and
      bottom, and the middle band, where the text actually sits, stays clear.
-   * Two surfaces. ::before blooms outward behind the panel; ::after washes
-     across the panel's face, under the text, clipped by the same radius.
    * Alpha is deliberately low and breathes on a fourth, slower period, so
      the whole thing swells and settles instead of holding one level.
 
-   Cost stays where it was: no layout, no listener while idle, and the only
-   thing typing changes is opacity. `useGlow` still writes only --glow-on. */
+   Speed is the reactive channel. Three states, all set from `useGlow`:
+
+   | state              | playback rate | what it reads as        |
+   |--------------------|---------------|-------------------------|
+   | empty box          | 0.55          | barely moving, ambient  |
+   | has text, idle     | 1.1           | flowing on its own      |
+   | keystrokes landing | 2.4           | quickens under the hand |
+
+   Rate is changed with `Animation.updatePlaybackRate()`, never by rewriting
+   `animation-duration`. Duration is the wrong knob: the browser keeps the
+   elapsed time and recomputes progress as `t / duration`, so halving it
+   teleports the blobs to a new phase. `updatePlaybackRate` holds the current
+   position and only changes how fast it advances -- the flow accelerates
+   instead of jumping.
+
+   Cost stays where it was: no layout, no listener while idle, and the whole
+   reaction is opacity plus a playback rate on animations already running. */
 @property --g1x { syntax: "<percentage>"; initial-value: 12%; inherits: false; }
 @property --g1y { syntax: "<percentage>"; initial-value: -8%; inherits: false; }
 @property --g2x { syntax: "<percentage>"; initial-value: 88%; inherits: false; }
@@ -757,14 +773,14 @@ h1 {
 
 .composer {
   position: relative;
-  /* Contain the stack so ::before can sit behind the panel without
-     escaping into whatever is painted under the page. */
   isolation: isolate;
+  /* The containment rule, stated once. Nothing the light does can reach
+     past the rounded rectangle -- not a blob that drifts wide, not a future
+     surface someone adds below. */
+  overflow: hidden;
 }
 
-/* The three blobs, written once. Both surfaces paint the same light; they
-   differ only in scale, blur and how far they reach. */
-.composer::before,
+/* The light itself: one surface, inset to the panel, under the text. */
 .composer::after {
   content: ""; position: absolute; border-radius: inherit;
   pointer-events: none;
@@ -790,28 +806,17 @@ h1 {
     g-drift-2 23s ease-in-out infinite alternate,
     g-drift-3 13s ease-in-out infinite alternate,
     g-swell 9s ease-in-out infinite alternate;
-}
-
-/* Outward bloom. Sits behind the panel's own opaque background, so it is
-   only ever seen spilling past the edges -- the halo on the page. */
-.composer::before {
-  inset: -26px;
-  border-radius: 34px;
-  filter: blur(26px);
-  opacity: calc((0.4 + var(--glow-on, 0) * 0.55) * var(--g-swell) * var(--wash, 1));
-  transition: opacity 0.55s ease;
-  z-index: -1;
-}
-
-/* Inward wash. Above the panel background, below the text. No blur: the
-   gradients are already soft, and blurring here would bleed past the
-   rounded corners and undo the shape. */
-.composer::after {
+  /* No blur: the gradients are already soft, and blurring here would only
+     smear them against the clip edge. */
   inset: 0;
-  /* Half the bloom's strength. This surface is the one with text on top of
-     it, so it is tuned to be felt rather than seen -- the eye should notice
-     the panel is lit, not read a colour. */
-  opacity: calc((0.3 + var(--glow-on, 0) * 0.3) * var(--g-swell) * var(--wash, 1));
+  /* Three terms, one per state. --glow-on holds while the box has text;
+     --glow-hot spikes on a keystroke and decays. The floor is what an empty
+     composer shows. Text sits on top of this, so it is tuned to be felt
+     rather than read -- the panel looks lit, not coloured. */
+  opacity: calc(
+    (0.28 + var(--glow-on, 0) * 0.2 + var(--glow-hot, 0) * 0.18)
+    * var(--g-swell) * var(--wash, 1)
+  );
   transition: opacity 0.5s ease;
   z-index: 0;
   /* Fade the wash out of the vertical middle regardless of where the blobs
@@ -820,8 +825,8 @@ h1 {
   --wash-mask: linear-gradient(
     to bottom,
     #000 0%,
-    rgba(0, 0, 0, 0.16) 40%,
-    rgba(0, 0, 0, 0.16) 78%,
+    rgba(0, 0, 0, 0.26) 40%,
+    rgba(0, 0, 0, 0.26) 78%,
     #000 100%
   );
   -webkit-mask: var(--wash-mask);
@@ -859,9 +864,7 @@ h1 {
   .canvas::after, .frame::after { display: none; }
   /* The light stays -- a still wash is not motion -- but nothing drifts,
      breathes, or reacts to typing. */
-  .composer::before, .composer::after { animation: none; transition: none; }
-  .composer::after { opacity: 0.5; }
-  .composer::before { opacity: 0.32; }
+  .composer::after { animation: none; transition: none; opacity: 0.5; }
   .frame::before { animation: none; opacity: 0.35; }
 }
 /* Backdrop parallax: transform-only drift following the pointer. */

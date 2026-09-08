@@ -25,7 +25,15 @@ export default function Composer({ placeholder, busy, compact, onSend }: Props) 
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   }, [value]);
 
-  const sendable = value.trim().length > 0 && !busy;
+  const filled = value.trim().length > 0;
+  const sendable = filled && !busy;
+
+  // The light keeps flowing for as long as there is something in the box,
+  // and settles once it is empty again -- including after a send, which
+  // clears `value` without a keystroke.
+  useEffect(() => {
+    glow.fill(filled);
+  }, [filled, glow]);
 
   return (
     <form
@@ -55,6 +63,7 @@ export default function Composer({ placeholder, busy, compact, onSend }: Props) 
           setValue(e.target.value);
           glow.ping();
         }}
+        onPaste={() => glow.ping()}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
