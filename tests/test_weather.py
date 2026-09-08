@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from core.units import Unit
-from ingest.sources import open_meteo
+from ingest.sources import gdacs, open_meteo
 from tools.risk.risk_score import ComputeRiskScoreIn, compute_risk_score
 from tools.weather.alerts import ActiveAlertsIn, active_alerts
 from tools.weather.tides import TidesIn, tides
@@ -370,3 +370,179 @@ def test_provenance_carries_the_exact_query(cache_dir):
     assert out.provenance.query is not None
     assert out.provenance.source_url is not None
     assert out.provenance.retrieved_at is not None
+
+
+# ==========================================================================
+# Derived wave advisories
+# ==========================================================================
+
+
+def _series(heights, swells=None):
+    """A wave series shaped like wave_forecast's, for the derivation."""
+    from datetime import datetime, timedelta, timezone
+
+    from tools.weather.wave_forecast import WaveSample
+
+    start = datetime.now(timezone.utc)
+    return [
+        WaveSample(
+            time=start + timedelta(hours=i),
+            significant_height_m=h,
+            period_s=8.0,
+            swell_wave_height_m=(swells[i] if swells else None),
+        )
+        for i, h in enumerate(heights)
+    ]
+
+
+def test_a_calm_sea_derives_nothing_and_says_so():
+    """Below every published band is a real result, not a missing one.
+
+    This is the distinction the whole alerts path is built on. An empty list
+    here licenses the negative finding "no high wave alert is in force"; a
+    failure to look does not, and the two must never converge.
+    """
+    from alerts.derived import derive_wave_advisories
+
+    advisories, notes = derive_wave_advisories(_series([0.4, 0.6, 0.5]), "Nagapattinam")
+    assert advisories == []
+    assert any("below every band" in n for n in notes)
+
+
+def test_the_published_bands_are_applied_not_guessed():
+    """3.0-3.5 m is INCOIS's alert band; above 3.5 m is their warning.
+
+    Read from config/risk_thresholds.yaml, where the numbers are tagged
+    `provenance: published` and carry the date they were verified. Hardcoding
+    them here would let the config and the behaviour drift apart, and the
+    config is the thing we open when a judge asks why 3.5.
+    """
+    from alerts.derived import derive_wave_advisories
+
+    alert, _ = derive_wave_advisories(_series([1.0, 3.2, 2.0]), "Nagapattinam")
+    assert [a["severity"] for a in alert] == ["advisory"]
+    assert alert[0]["type"] == "high_wave"
+
+    warning, _ = derive_wave_advisories(_series([1.0, 3.9]), "Nagapattinam")
+    assert [a["severity"] for a in warning] == ["warning"]
+
+    # The peak drives it, not the average: a boat meets the worst hour it is
+    # out in, not the mean of the day.
+    assert derive_wave_advisories(_series([0.2, 0.2, 3.9]), "X")[0][0]["severity"] == "warning"
+
+
+def test_swell_uses_its_own_lower_band():
+    """2.5 m of swell is an advisory; 2.5 m of significant height is not.
+
+    Long-period swell breaks harder inshore than its height suggests, which
+    is why INCOIS publishes a separate lower band for it.
+    """
+    from alerts.derived import derive_wave_advisories
+
+    advisories, _ = derive_wave_advisories(
+        _series([2.6, 2.6], swells=[2.6, 2.6]), "Nagapattinam"
+    )
+    kinds = {a["type"] for a in advisories}
+    assert kinds == {"swell_surge"}, "the same height must not trip the Hs band"
+
+
+def test_a_missing_swell_component_is_not_reported_as_calm():
+    """Open-Meteo does not always return the wind-wave/swell split.
+
+    No swell advisory then means the component was absent, not that the swell
+    was small, and the notes have to say which -- otherwise the caller reads
+    silence as safety.
+    """
+    from alerts.derived import derive_wave_advisories
+
+    _, notes = derive_wave_advisories(_series([1.0, 1.2]), "Nagapattinam")
+    assert any("must not be reported as clear" in n for n in notes)
+
+
+def test_a_derived_advisory_never_impersonates_incois():
+    """It is our arithmetic on their criteria, and it says so on its face."""
+    from alerts.derived import DERIVED_AUTHORITY, derive_wave_advisories
+
+    advisories, _ = derive_wave_advisories(_series([4.0]), "Nagapattinam")
+    assert advisories
+    for advisory in advisories:
+        assert advisory["authority"] == DERIVED_AUTHORITY
+        assert "ORCA" in advisory["authority"]
+        assert "not read" in advisory["text"], (
+            "the text must state that the INCOIS bulletin itself was not consulted"
+        )
+
+
+def test_an_operator_bulletin_outranks_our_arithmetic(monkeypatch):
+    """A human who read the actual authority wins, at equal severity.
+
+    Especially when the two disagree. Our derivation is corroboration for a
+    published bulletin, never a replacement for one.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from alerts.derived import DERIVED_AUTHORITY
+    from tools.weather import alerts as alerts_module
+
+    now = datetime.now(timezone.utc)
+    transcribed = alerts_module.Advisory(
+        type="high_wave",
+        severity="warning",
+        zone="Nagapattinam",
+        issued_at=now,
+        valid_until=now + timedelta(hours=12),
+        authority="INCOIS",
+        text="High Wave Alert transcribed from the bulletin.",
+    )
+    monkeypatch.setattr(gdacs, "load_cached", lambda *a, **k: None)
+    monkeypatch.setattr(
+        alerts_module, "_load_operator_table", lambda: ([transcribed], now, [])
+    )
+    monkeypatch.setattr(
+        alerts_module,
+        "_derive_wave",
+        lambda *a, **k: (
+            [
+                {
+                    "type": "high_wave",
+                    "severity": "warning",
+                    "zone": "Nagapattinam",
+                    "issued_at": now,
+                    "valid_until": now + timedelta(hours=12),
+                    "authority": DERIVED_AUTHORITY,
+                    "text": "derived",
+                }
+            ],
+            [],
+        ),
+    )
+    out = active_alerts(ActiveAlertsIn(lat=LAT, lon=LON, district="Nagapattinam"))
+    high = [a for a in out.alerts if a.type == "high_wave"]
+    assert len(high) == 1, "the same advisory must not be counted twice"
+    assert high[0].authority == "INCOIS", "the transcribed bulletin must win"
+
+
+def test_wave_types_stay_checked_when_the_operator_table_goes_stale(monkeypatch):
+    """The whole point. A stale YAML file no longer blinds the wave half.
+
+    Before this, the table stopped counting as a check after twenty-four
+    hours, so once nobody had opened it for a day every answer became
+    cyclone-only -- silently, and on the exact days a demo is most likely to
+    happen.
+    """
+    from tools.weather import alerts as alerts_module
+
+    monkeypatch.setattr(gdacs, "load_cached", lambda *a, **k: None)
+    monkeypatch.setattr(
+        alerts_module,
+        "_load_operator_table",
+        lambda: ([], None, ["operator table last reviewed too long ago"]),
+    )
+    out = active_alerts(ActiveAlertsIn(lat=LAT, lon=LON))
+    if "no cached wave forecast" in " ".join(out.quality.notes):
+        pytest.skip("no wave cache present; run scripts/refresh_cache.py --weather")
+    assert set(out.checked_types) == {"high_wave", "swell_surge"}
+    assert "cyclone" not in out.checked_types, (
+        "a wave forecast is not evidence about a cyclone"
+    )
+    assert out.checked is True

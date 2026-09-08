@@ -73,6 +73,15 @@ GDACS_ALERT_TO_SEVERITY = {
 TYPE_COVERAGE = {
     "gdacs": {"cyclone"},
     "operator_table": {"cyclone", "high_wave", "swell_surge"},
+    # The cached wave field measured against the published INCOIS bands. It
+    # covers the wave types and nothing else -- a wave forecast says nothing
+    # about a cyclone, and listing cyclone here would let a calm sea pass as
+    # evidence that no storm is tracked.
+    #
+    # Registering it as real coverage is the point: without it, wave types
+    # counted as unchecked whenever the operator table went stale, which
+    # after twenty-four hours of nobody editing a YAML file was always.
+    "derived_wave": {"high_wave", "swell_surge"},
     # No source. Kept here so the gap is visible in code rather than implied by
     # absence: lightning nowcasts are an IMD product behind an authenticated
     # API (HTTP 401 as of 2026-09-06).

@@ -159,6 +159,39 @@ def _load_operator_table() -> tuple[list[Advisory], datetime | None, list[str]]:
     return advisories, reviewed, notes
 
 
+def _derive_wave(
+    lat: float, lon: float, district: str | None
+) -> tuple[list[dict] | None, list[str]]:
+    """Derived wave advisories at a point, or ``None`` if nothing was read.
+
+    ``None`` and ``[]`` mean different things here, exactly as they do for
+    the tool as a whole: ``None`` is "no cached forecast, so this source
+    could not be interrogated" and must not add itself to ``live_sources``,
+    while ``[]`` is "we looked and the sea is under every published band",
+    which is the result that licenses a negative finding.
+    """
+    from alerts.derived import derive_wave_advisories
+    from tools.weather.wave_forecast import WaveForecastIn, wave_forecast
+
+    try:
+        forecast = wave_forecast(
+            WaveForecastIn(lat=lat, lon=lon, hours=24)
+        )
+    except Exception as exc:  # noqa: BLE001 -- a wave read must not sink the alert check
+        return None, [f"wave cache unreadable, no derived advisory: {exc}"]
+
+    if forecast.status is ToolStatus.FAILED or not forecast.series:
+        return None, [
+            "no cached wave forecast at this point; wave advisories NOT derived "
+            "and must not be reported as clear"
+        ]
+
+    advisories, notes = derive_wave_advisories(
+        forecast.series, district or f"{lat:.2f}N {lon:.2f}E"
+    )
+    return advisories, notes
+
+
 def active_alerts(args: ActiveAlertsIn) -> ActiveAlertsOut:
     """Advisories in force. Returns FAILED when nothing could be checked.
 
@@ -214,6 +247,24 @@ def active_alerts(args: ActiveAlertsIn) -> ActiveAlertsOut:
                 f"GDACS cache from {fetched_at.isoformat(timespec='minutes')}"
             )
 
+    # -- wave advisories, derived from the cached forecast --------------
+    #
+    # Wave coverage used to depend entirely on a human editing a YAML file,
+    # and the table stops counting as a check after a day. So after
+    # twenty-four hours of nobody looking, every answer quietly became
+    # cyclone-only. This derives the wave half from the forecast already in
+    # the cache against the INCOIS criteria already in the thresholds file --
+    # arithmetic on published numbers, inventing nothing. See alerts/derived.
+    wave_types = {"high_wave", "swell_surge"} & set(requested)
+    if wave_types and args.lat is not None and args.lon is not None:
+        derived, derive_notes = _derive_wave(args.lat, args.lon, args.district)
+        notes.extend(derive_notes)
+        if derived is not None:
+            live_sources.append("derived_wave")
+            for raw in derived:
+                if raw["type"] in wave_types:
+                    collected.append(Advisory(**raw))
+
     # -- everything else, from the operator table ----------------------
     table, reviewed, table_notes = _load_operator_table()
     notes.extend(table_notes)
@@ -235,7 +286,10 @@ def active_alerts(args: ActiveAlertsIn) -> ActiveAlertsOut:
         source="+".join(live_sources) if live_sources else "none",
         source_url=source_urls[0] if source_urls else None,
         retrieved_at=datetime.now(timezone.utc),
-        authority="GDACS (cyclone); INCOIS via operator table (wave)",
+        authority=(
+            "GDACS (cyclone); INCOIS criteria applied to the cached forecast "
+            "(wave); INCOIS via operator table where transcribed"
+        ),
     )
 
     # Nothing could be interrogated at all.
@@ -259,13 +313,22 @@ def active_alerts(args: ActiveAlertsIn) -> ActiveAlertsOut:
     # De-duplicate by (type, zone), keeping the worst severity. GDACS and a
     # transcribed IMD bulletin can describe the same storm; reporting it twice
     # would double-count it in any consumer that reads `count`.
+    from alerts.derived import DERIVED_AUTHORITY
+
+    def _rank(advisory: Advisory) -> tuple[int, int]:
+        # Severity first, then who said it. A human who read the actual
+        # bulletin outranks our arithmetic even when the two agree, and
+        # especially when they disagree -- the authority is the authority.
+        return (
+            SEVERITY_ORDER.index(advisory.severity),
+            0 if advisory.authority == DERIVED_AUTHORITY else 1,
+        )
+
     worst: dict[tuple[str, str], Advisory] = {}
     for advisory in collected:
         key = (advisory.type, advisory.zone)
         incumbent = worst.get(key)
-        if incumbent is None or SEVERITY_ORDER.index(
-            advisory.severity
-        ) > SEVERITY_ORDER.index(incumbent.severity):
+        if incumbent is None or _rank(advisory) > _rank(incumbent):
             worst[key] = advisory
     alerts = sorted(
         worst.values(), key=lambda a: SEVERITY_ORDER.index(a.severity), reverse=True

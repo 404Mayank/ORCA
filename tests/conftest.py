@@ -60,6 +60,20 @@ def no_alert_sources(monkeypatch):
         "_load_operator_table",
         lambda: ([], None, ["operator table unavailable (test fixture)"]),
     )
+    # Derived wave advisories are a third source (alerts/derived.py): the
+    # cached forecast measured against the published INCOIS bands. It has to
+    # be stubbed too, or "every source unreachable" quietly becomes "one
+    # source still working" and the tests that depend on a total outage stop
+    # testing a total outage -- exactly the rot this fixture exists to
+    # prevent, one source later.
+    #
+    # None, not []: [] means "we derived, and the sea is under every band",
+    # which is a successful check.
+    monkeypatch.setattr(
+        alerts_module,
+        "_derive_wave",
+        lambda *a, **k: (None, ["no cached wave forecast (test fixture)"]),
+    )
     return True
 
 
