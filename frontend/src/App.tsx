@@ -262,13 +262,35 @@ export default function App() {
       setRecents(pushRecent({ query: text, verdict: response.verdict ?? null, at: Date.now() }));
       const rec = asRecommendation(response.recommendation);
       const origin = rec?.spatial_context?.origin;
-      if (rec && validOrigin(origin)) {
-        setMapFor(rec);
-        setPanel("map");
+      // Both side-panel tabs bind to THIS answer, together, every turn.
+      //
+      // `drawer` used to be set only by the "read the layers behind this"
+      // button, which had two consequences. The Evidence tab sat disabled
+      // after a fresh answer until you clicked that button -- the panel
+      // offered a tab it would not open. And once clicked, `drawer` held
+      // that recommendation for the rest of the session: the next answer
+      // replaced the map but not the evidence, so the pane quietly listed
+      // the previous answer's tool calls beside the current one. In a
+      // system whose whole claim is that every number traces to a tool
+      // call, evidence for a different question is the worst thing this
+      // panel can show.
+      if (rec) {
+        setDrawer(rec);
+        if (validOrigin(origin)) {
+          setMapFor(rec);
+          setPanel("map");
+        } else {
+          // Answerable but unplaced (causal, a conditions read with no
+          // fix). There is no map to show, so the evidence is the panel --
+          // and the stale one must go with it.
+          setMapFor(null);
+          setPanel("evidence");
+        }
       } else {
-        // A follow-up with no position (clarification, chat, refusal) or
-        // an answer without one must not leave the previous answer's
-        // map/evidence standing beside it.
+        // A clarification, chat reply or refusal carries no recommendation.
+        // Nothing about the previous answer may stand beside it.
+        setDrawer(null);
+        setMapFor(null);
         setPanel(null);
       }
     } catch (error) {
