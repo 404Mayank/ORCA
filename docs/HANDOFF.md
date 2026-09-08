@@ -208,3 +208,51 @@ follow it with. Do not delete those tests to make a reword land faster.
 Still English by design, and declared in-answer by a Tamil note:
 model-authored hypothesis statements, `confidence.basis`, caveats, and the
 per-agent deliberation `notes`.
+
+## 13. Deployment (Modal)
+
+Live: **https://mayank-96615--orca-api.modal.run** (`/health`, `/readiness`,
+`/chat`, `/chat/stream`, all of §4). Defined in `deploy/modal_app.py`; the
+frontend deploys separately to Vercel and points at that URL.
+
+```
+pip install -e ".[deploy]"
+modal token set --token-id "$modal_token_id" --token-secret "$modal_token_secret"
+modal secret create orca-llm OPENCODE_API_KEY=... OPENCODE_GO_API_KEY=... \
+    GROQ_API_KEY=... ORCA_TIER=paid
+modal deploy deploy/modal_app.py
+modal run deploy/modal_app.py::refresh      # seed the cache, first deploy only
+```
+
+**Two constraints the file exists to hold, and one trap it fell into.**
+
+*One container.* `max_containers=1`. `/replay` swaps the cache directory
+process-globally and `/chat` 503s while a replay holds the lock -- a Python
+object, so per-process. Two containers each hold their own, and a replay in
+one would not fence questions arriving at the other: a fisherman handed
+cyclone-replay conditions as live ones. This is what §4's "single-worker
+deployments only" means in a runtime that would otherwise scale out by
+itself. Concurrency *inside* the container is fine and is set to 8.
+
+*A live cache, not a frozen one.* Tools never fetch during a question, so
+`data/` has to stay fresh. It lives in the `orca-data` Volume, refreshed
+every 6 h by the `refresh` function (`--weather --alerts`; satellite layers
+are run by hand, being large and daily). The image carries a copy as a seed,
+used only when the Volume is empty on a first deploy.
+
+*The trap:* a Volume mount is a snapshot, and `min_containers=1` keeps the
+server alive for days. The scheduled refresh runs in a different container,
+so its writes were invisible to the one serving traffic -- after a
+successful refresh, `/readiness` still reported the seed cache's age. A
+rate-limited `cache.reload()` in middleware fixes it (15 min, well inside
+the 12 h staleness gate). Verified: `age_hours` went 8.13 -> 0.03.
+
+**CORS** is `ORCA_ALLOWED_ORIGINS`, comma-separated, on the `orca-llm`
+secret. Empty means no CORS headers -- correct for curl, and it stops a page
+on another domain spending this deployment's tokens. Add the Vercel URL
+there when the frontend lands.
+
+Measured on the deployment, 2026-09-08: safety question 9.7 s end to end
+(verified, 33 numbers checked), a plain conditions reading 4.3 s down the
+direct route, SSE frames arriving progressively rather than buffered.
+

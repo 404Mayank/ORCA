@@ -23,6 +23,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Deployment only. Never imported by the app -- deploy/modal_app.py is run by
+# the modal CLI, not by orchestrator/, so a missing modal package can never
+# break a turn.
+deploy = [
+    "modal>=1.5",
+]
+
 # Split out because this is the group most likely to fight a Windows install.
 # The deterministic core (core/, orchestrator/validate_plan, verifier) runs
 # with the base dependencies alone, on purpose: the part judges poke at must
