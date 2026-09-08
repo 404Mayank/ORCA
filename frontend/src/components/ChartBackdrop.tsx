@@ -82,7 +82,9 @@ export default function ChartBackdrop({ theme }: { theme: Theme }) {
 
       const css = (n: string) =>
         getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-      const colour = css("--isobath") || "#c1d3d5";
+      // --contour, not --isobath: the wallpaper needs to be darker than the
+      // hairline borders that share that token, and only in light mode.
+      const colour = css("--contour") || css("--isobath") || "#c1d3d5";
       const s = Math.max(w, h);
       const N = 150;
       g.lineWidth = 1;
@@ -146,6 +148,10 @@ export default function ChartBackdrop({ theme }: { theme: Theme }) {
 
   return (
     <>
+      {/* Paper tooth. A element rather than another pseudo on .canvas,
+          which already spends both of its own on the ground and the drift
+          wash. Purely decorative and hidden from the tree. */}
+      <div className="grain" aria-hidden="true" />
       <canvas id="chart" ref={canvas} aria-hidden="true" />
       <div className="grat grat-top" aria-hidden="true">
         {lons.map((l) => (
