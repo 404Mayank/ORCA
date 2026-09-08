@@ -146,11 +146,11 @@ def api():
     """The same FastAPI app the CLI and the laptop run. No fork, no variant."""
     _seed_cache_if_empty()
 
+    import asyncio
     import hmac
     import time
 
     from fastapi import Request
-    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse
 
     from orchestrator.main import app as orca
@@ -168,16 +168,30 @@ def api():
     # behind in a way a user could notice.
     reload_every_s = 900.0
     last_reload = [0.0]
+    reload_lock = asyncio.Lock()
 
     @orca.middleware("http")
     async def refresh_volume_view(request: Request, call_next):
         now = time.monotonic()
         if now - last_reload[0] > reload_every_s:
-            last_reload[0] = now
-            try:
-                cache.reload()
-            except Exception as exc:  # noqa: BLE001 -- a stale view beats a 500
-                print(f"volume reload failed, serving the previous view: {exc}")
+            async with reload_lock:
+                # Re-check inside the lock: a burst of requests arrives
+                # together at page load, and without this every one of them
+                # would queue its own reload behind the first.
+                if time.monotonic() - last_reload[0] > reload_every_s:
+                    last_reload[0] = time.monotonic()
+                    try:
+                        # OFF the event loop. Volume.reload() is synchronous
+                        # I/O, and calling it directly from async middleware
+                        # stalled every other request in flight -- the
+                        # handlers still completed (Modal logged 200) but the
+                        # connections died before their bodies reached the
+                        # browser, which saw net::ERR_FAILED. Found by a page
+                        # whose three start-up calls failed while the server
+                        # insisted it had served all three.
+                        await asyncio.to_thread(cache.reload)
+                    except Exception as exc:  # noqa: BLE001 -- a stale view beats a 500
+                        print(f"volume reload failed, serving previous view: {exc}")
         return await call_next(request)
 
     # ---------------------------------------------------------------
@@ -233,20 +247,11 @@ def api():
             )
         return await call_next(request)
 
-    # The frontend is deployed separately (Vercel), so it is cross-origin.
-    # Read from the environment rather than hardcoded: a preview deployment
-    # gets its own URL, and a wildcard here would let any page on the
-    # internet spend this deployment's tokens.
-    origins = [
-        o.strip() for o in os.environ.get("ORCA_ALLOWED_ORIGINS", "").split(",") if o.strip()
-    ]
-    if origins:
-        orca.add_middleware(
-            CORSMiddleware,
-            allow_origins=origins,
-            allow_methods=["GET", "POST", "DELETE"],
-            allow_headers=["Content-Type", AUTH_HEADER],
-        )
+    # CORS is NOT configured here. orchestrator/main.py already installs
+    # CORSMiddleware, and adding a second layer meant two middlewares racing
+    # to set the same header on every response. main.py reads
+    # ORCA_ALLOWED_ORIGINS itself, so this deployment gets its restriction
+    # from the same secret without a second stack entry.
     return orca
 
 

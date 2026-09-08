@@ -17,6 +17,7 @@ rather than at the first question.
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,12 +40,24 @@ app = FastAPI(
 )
 
 # The frontend is a separate Vite dev server, so it is cross-origin from the
-# start. Wide open because this serves public forecast data, holds no
-# credentials and has no authenticated state -- if that ever changes, this is
-# the first line to revisit.
+# start. This used to be `allow_origins=["*"]`, with a note saying that was
+# fine while the API held no credentials and no authenticated state, and that
+# the line should be revisited the moment that changed.
+#
+# It changed: the deployed API is behind a shared-secret header
+# (deploy/modal_app.py), so a wildcard would now let a page on any domain
+# invite a visitor's browser to spend this deployment's tokens.
+#
+# So the origins come from ORCA_ALLOWED_ORIGINS, comma-separated. Unset means
+# "*", which keeps local development and the CLI exactly as they were -- the
+# laptop has no gate to protect and no bill to run up. It is the deployment
+# that sets the variable, and there is deliberately only one CORS layer:
+# stacking a second one in the Modal wrapper had two middlewares racing to
+# set the same header on every response.
+_origins = [o.strip() for o in os.environ.get("ORCA_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins or ["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
