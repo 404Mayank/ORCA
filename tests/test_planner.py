@@ -677,3 +677,103 @@ def test_the_narrator_prompt_forbids_inventing_a_verdict():
     prompt = narrate.PROMPT_PATH.read_text(encoding="utf-8").lower()
     assert "do not create one" in prompt
     assert "caveat is never the opening sentence" in prompt
+
+
+# ==========================================================================
+# The direct router tier
+# ==========================================================================
+
+
+def _routed_direct(place="Rameswaram", query="what's the tide at Rameswaram", **extra):
+    from agents.intent_planner_agent import _direct
+    from orchestrator.llm.client import LLMResult
+
+    payload = {"kind": "direct", "place": place, "_query": query, **extra}
+    return _direct(payload, LLMResult(ok=True, provider="test", model="m", text=""))
+
+
+def test_a_plain_reading_skips_the_planner_entirely():
+    """The point of the tier: a tide time should not cost an agentic pass.
+
+    "What's the tide at Rameswaram" has no decision in it, no missing slot
+    and no verdict to reach. Under the old binary router it paid for a
+    three-thousand-token planner call, four agents deliberating and a
+    collaboration round to produce a number a fixed plan produces at once.
+    """
+    out = _routed_direct()
+    assert out is not None
+    assert out.state == "plan"
+    assert out.output.intent.query_type is QueryType.CONDITIONS_REPORT
+    assert out.output.plan["steps"][0]["tool"] == "resolve_place"
+
+
+def test_the_fast_path_is_not_a_failure_and_does_not_wear_the_badge():
+    """`used_fallback` measures the planner failing, and it did not fail here.
+
+    It was deliberately not called. Marking this as a fallback would corrupt
+    the one metric that tells us how often the planner is actually breaking.
+    """
+    out = _routed_direct()
+    assert out.used_fallback is False
+    assert any("routed direct" in note for note in out.notes)
+    assert not any("clarification" in note for note in out.notes), (
+        "this turn answered no clarification; saying so would mislead a reader"
+    )
+
+
+def test_the_model_cannot_nominate_a_safety_question_for_the_fast_lane():
+    """The query type is pinned in code, never taken from the router.
+
+    A model that could put safety_assess on the fast path would be deciding
+    to skip the rule floor -- the pass where agents add the safety-critical
+    checks nobody typed into the fallback plan. That is exactly the
+    judgement CLAUDE.md keeps out of a model's hands, and it does not become
+    acceptable because it arrived as a JSON field.
+    """
+    out = _routed_direct(query_type="safety_assess", kind="direct")
+    assert out is not None
+    assert out.output.intent.query_type is QueryType.CONDITIONS_REPORT
+    assert out.output.intent.vessel_class is None
+
+
+def test_a_direct_route_with_no_place_falls_through_to_the_planner():
+    """An optimisation that guesses is a bug. The slow path is always correct."""
+    assert _routed_direct(place="") is None
+    assert _routed_direct(place="   ") is None
+
+
+def test_only_read_only_types_are_eligible():
+    """Pinned so that widening the fast lane has to be a deliberate edit."""
+    from agents.intent_planner_agent import DIRECT_ELIGIBLE
+
+    assert DIRECT_ELIGIBLE == {QueryType.CONDITIONS_REPORT}
+    for verdict_bearing in (QueryType.SAFETY_ASSESS, QueryType.GEOFENCE_CHECK):
+        assert verdict_bearing not in DIRECT_ELIGIBLE
+
+
+def test_routing_never_drops_the_plan_it_built():
+    """Regression: the direct tier's plan was discarded on the way out.
+
+    `plan_query` rebuilds the routed result to prepend its own notes. That
+    rebuild was written when routing could only mean chat -- which carries no
+    plan -- so it listed the fields chat needed and silently dropped the rest.
+    When the direct tier started returning a plan, `run_turn` saw
+    `planning.plan is None`, took it for a refusal, and told the user their
+    question could not be answered yet. Every field must survive the copy.
+    """
+    import agents.intent_planner_agent as planner
+
+    built = _routed_direct()
+    assert built is not None and built.plan is not None
+
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.setattr(planner, "_route", lambda *a, **k: built)
+        out = planner.plan_query("What is the tide doing at Rameswaram today?")
+    finally:
+        monkey.undo()
+
+    assert out.plan is not None, "the routed plan was lost on the way out"
+    assert out.state == "plan"
+    assert out.used_fallback is False
+    assert any("routed direct" in note for note in out.notes)

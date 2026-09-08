@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -440,12 +440,30 @@ def _route(
     always waste. This call asks one small question with a small prompt, and
     only a turn that is genuinely about the sea goes on to pay for the planner.
 
-    Returns a finished chat result, or None meaning "this is a real query, plan
-    it properly". A router failure also returns None: when in doubt the planner
-    runs, because losing a safety question is far worse than spending tokens.
+    Three outcomes now, not two:
+
+    * a finished **chat** result;
+    * a **direct** result -- the question is a plain reading at a named place,
+      so it takes the deterministic plan for that query type and skips the
+      planner entirely;
+    * ``None``, meaning plan it properly.
+
+    A router failure also returns None: when in doubt the planner runs,
+    because losing a safety question is far worse than spending tokens.
+
+    The direct tier exists because the binary was the wrong shape. This
+    router was added for arithmetic -- see above -- and having been added, it
+    could only sort turns into "small talk" and "pay for the full agentic
+    flow". A question like *"what's the tide at Rameswaram"* has no decision
+    in it, no missing slot and no verdict to reach, and it was paying for a
+    planner call, four agents deliberating and a collaboration round to
+    produce a tide time that a fixed three-step plan produces at once.
     """
     system = ROUTER_PATH.read_text(encoding="utf-8")
     payload: dict[str, Any] = {"user_said": query}
+    # Stashed for _direct, which needs the user's own words for
+    # Intent.raw_query. Never sent to the model; it already has them.
+    _carry: dict[str, Any] = {"_query": query}
     if dialogue:
         payload["conversation"] = dialogue
     if awaiting:
@@ -465,7 +483,12 @@ def _route(
     except (ValueError, json.JSONDecodeError):
         return None
 
-    if str(data.get("kind", "")).lower() != "chat":
+    kind = str(data.get("kind", "")).lower()
+
+    if kind == "direct":
+        return _direct({**data, **_carry}, result)
+
+    if kind != "chat":
         return None
 
     text = str(data.get("text", "")).strip()
@@ -479,6 +502,67 @@ def _route(
         llm_model=result.model,
         notes=["routed as conversation; planner not called"],
     )
+
+
+#: Query types the fast path may serve. Deliberately one.
+#:
+#: ``conditions_report`` is the only type CLAUDE.md defines as read-only: no
+#: verdict, no vessel gate, and safety phrasing is already routed away from it
+#: in code. Everything else either reaches a verdict, or gates on a boat, or
+#: decides whether crossing a line means arrest -- and the agentic pass is
+#: where the rule floor adds the safety-critical checks nobody typed into the
+#: fallback plan. Skipping that to save a few seconds on a safety question is
+#: not a trade worth making.
+#:
+#: Widening this is one line and a decision. It should be a decision.
+DIRECT_ELIGIBLE = frozenset({QueryType.CONDITIONS_REPORT})
+
+
+def _direct(data: dict[str, Any], result: Any) -> PlanningResult | None:
+    """Build a deterministic plan straight from the router's answer.
+
+    Returns ``None`` -- fall through to the planner -- on anything unexpected.
+    The fast path is an optimisation, and an optimisation that guesses is a
+    bug; the slow path is always available and always correct.
+
+    The model does not get to choose the query type. It reports that the turn
+    is a plain reading at a place, and the type is pinned here. A model that
+    could nominate ``safety_assess`` for the fast lane would be deciding to
+    skip the rule floor, which is precisely the judgement CLAUDE.md keeps out
+    of a model's hands.
+    """
+    place = str(data.get("place") or "").strip()
+    if not place:
+        return None
+
+    query_type = QueryType.CONDITIONS_REPORT
+    if query_type not in DIRECT_ELIGIBLE:  # pragma: no cover - guards a future edit
+        return None
+
+    intent = Intent(
+        query_type=query_type,
+        raw_query=str(data.get("_query") or place),
+        spatial_reference=SpatialReference(name=place),
+    )
+    if intent.blocking_gaps():
+        return None
+
+    routed = _use_fallback(
+        intent,
+        [
+            "routed direct: a plain conditions reading at a named place, "
+            "planned deterministically without the planner or a deliberation pass"
+        ],
+        1,
+        result.provider,
+        result.model,
+        deterministic=True,
+    )
+    # _use_fallback degrades to a clarification when the plan will not build.
+    # A clarification from the fast lane is not obviously wrong, but it was
+    # reached without the planner ever seeing the question, so hand the turn
+    # back rather than answering it with less thought than it deserves.
+    return routed if routed.state == "plan" else None
 
 
 _CHAT_SYSTEM = (
@@ -657,13 +741,13 @@ def plan_query(
     # Cheap first: is this even a question for the planner?
     routed = _route(query, dialogue, awaiting)
     if routed is not None:
-        return PlanningResult(
-            output=routed.output,
-            attempts=routed.attempts,
-            llm_provider=routed.llm_provider,
-            llm_model=routed.llm_model,
-            notes=notes + routed.notes,
-        )
+        # Rebuilt only to prepend this function's own notes. Every other field
+        # must survive -- `plan` above all. This re-wrap was written when
+        # routing could only mean chat, which carries no plan, so it silently
+        # dropped one; the direct tier's plan vanished here and `run_turn`
+        # read the missing plan as a refusal and told the user their question
+        # could not be answered yet. Copy the result, do not reconstruct it.
+        return replace(routed, notes=notes + routed.notes)
 
     system = _system_prompt()
     user = _user_message(
@@ -998,8 +1082,13 @@ def _use_fallback(
     result: PlanValidationResult = validate_plan(raw)
     if result.ok:
         output = PlannerOutput(intent=intent, state="plan", plan=raw)
-        if deterministic:
-            notes = notes + ["deterministic plan from an answered clarification; no model call was needed"]
+        if deterministic and not any("routed direct" in n for n in notes):
+            # Two callers reach here deterministically now -- an answered
+            # clarification and the direct router tier -- and the note has to
+            # say which. The direct route has already written its own; adding
+            # this one on top would tell a reader the turn answered a
+            # clarification it never asked.
+            notes = notes + ["deterministic plan from an answered clarification; no planner call was needed"]
         return PlanningResult(
             output=output,
             plan=result.plan,
