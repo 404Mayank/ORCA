@@ -49,9 +49,9 @@ def api():
     return TestClient(app)
 
 
-def test_default_tier_is_free_from_default(api, clean_tier):
+def test_default_tier_is_paid_from_default(api, clean_tier):
     body = api.get("/settings").json()
-    assert body["tier"] == "free"
+    assert body["tier"] == "paid"
     assert body["tier_source"] == "default"
     assert body["tiers"] == ["free", "fast", "paid"]
     assert isinstance(body["provider_order"], list) and body["provider_order"]
@@ -107,7 +107,7 @@ def test_post_null_returns_authority_to_env(api, clean_tier, monkeypatch):
 def test_unknown_tier_is_422_and_changes_nothing(api, clean_tier):
     response = api.post("/settings", json={"tier": "turbo"})
     assert response.status_code == 422
-    assert api.get("/settings").json()["tier"] == "free"
+    assert api.get("/settings").json()["tier"] == "paid"
 
 
 def test_deliberation_defaults_on(api, clean_tier):

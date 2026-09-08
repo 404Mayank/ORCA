@@ -82,6 +82,7 @@ def _env_off(monkeypatch):
     for var in (
         "OPENCODE_API_KEY", "OPENCODE_GO_API_KEY", "GROQ_API_KEY",
         "GROQ_API_KEY_2", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+        "ORCA_TIER",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -258,11 +259,11 @@ def test_provider_status_reports_both_gateways(monkeypatch):
     assert client.provider_status()["opencode-go"] is True
 
 
-def test_tier_defaults_free_and_rejects_unknown(monkeypatch):
+def test_tier_defaults_paid_and_rejects_unknown(monkeypatch):
     _env_off(monkeypatch)
-    assert client.tier() == "free"
+    assert client.tier() == "paid"
     monkeypatch.setenv("ORCA_TIER", "ludicrous")
-    assert client.tier() == "free"
+    assert client.tier() == "paid"
     monkeypatch.setenv("ORCA_TIER", "FAST")
     assert client.tier() == "fast"
 
@@ -293,7 +294,9 @@ def test_paid_tier_leads_with_spark_contributor(monkeypatch):
     assert script.urls() == ["https://opencode.ai/zen/go/v1/responses"]
 
 
-def test_free_tier_unchanged_without_env(monkeypatch):
+def test_paid_tier_chains_without_env(monkeypatch):
     _env_off(monkeypatch)
-    assert client.tier() == "free"
-    assert client._tier_chains() == {}
+    assert client.tier() == "paid"
+    chains = client._tier_chains()
+    assert chains["order"][0] == "opencode-go"
+    assert "muse-spark-1.3-contributor" in chains["opencode-go"]

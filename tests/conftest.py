@@ -35,6 +35,9 @@ def hermetic_env(monkeypatch):
         if var.startswith(("OPENCODE_", "GROQ_", "ANTHROPIC_")) or var in {
             "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_KEY",
             "DATABASE_URL", "COPERNICUS_USERNAME", "COPERNICUS_PASSWORD",
+            # Tier is machine state, not credentials -- but a local .env
+            # ORCA_TIER must not skew contract tests of the compiled default.
+            "ORCA_TIER",
         }:
             monkeypatch.delenv(var, raising=False)
 
