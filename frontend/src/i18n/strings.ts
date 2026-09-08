@@ -345,8 +345,12 @@ const en = {
       verify: "Verifying every number",
       narrate: "Writing it plainly",
     } as Record<string, string>,
-    brewing: "Brewing",
+    brewing: "Working",
     elapsed: "{n}s",
+    queued: "Queued",
+    listening: "Waiting for the first agent to report.",
+    byRules: "rules",
+    required: "required check",
   },
 
   crash: {
@@ -724,8 +728,12 @@ export const ta: Strings = {
       verify: "\u0b92\u0bb5\u0bcd\u0bb5\u0bca\u0bb0\u0bc1 \u0b8e\u0ba3\u0bcd\u0ba3\u0bc8\u0baf\u0bc1\u0bae\u0bcd \u0b9a\u0bb0\u0bbf\u0baa\u0bbe\u0bb0\u0bcd\u0b95\u0bcd\u0b95\u0bbf\u0bb1\u0ba4\u0bc1",
       narrate: "\u0b8e\u0bb3\u0bbf\u0ba4\u0bbe\u0b95 \u0b8e\u0bb4\u0bc1\u0ba4\u0bc1\u0b95\u0bbf\u0bb1\u0ba4\u0bc1",
     } as Record<string, string>,
-    brewing: "\u0ba4\u0baf\u0bbe\u0bb0\u0bbe\u0b95\u0bbf\u0bb1\u0ba4\u0bc1",
+    brewing: "\u0bb5\u0bc7\u0bb2\u0bc8\u0baf\u0bbf\u0bb2\u0bcd",
     elapsed: "{n} \u0bb5\u0bbf",
+    queued: "\u0bb5\u0bb0\u0bbf\u0b9a\u0bc8\u0baf\u0bbf\u0bb2\u0bcd",
+    listening: "\u0bae\u0bc1\u0ba4\u0bb2\u0bcd \u0bae\u0bc1\u0b95\u0bb5\u0bb0\u0bbf\u0ba9\u0bcd \u0b85\u0bb1\u0bbf\u0b95\u0bcd\u0b95\u0bc8\u0b95\u0bcd\u0b95\u0bc1\u0b95\u0bcd \u0b95\u0bbe\u0ba4\u0bcd\u0ba4\u0bbf\u0bb0\u0bc1\u0b95\u0bcd\u0b95\u0bbf\u0bb1\u0ba4\u0bc1.",
+    byRules: "\u0bb5\u0bbf\u0ba4\u0bbf\u0b95\u0bb3\u0bcd",
+    required: "\u0b95\u0b9f\u0bcd\u0b9f\u0bbe\u0baf\u0b9a\u0bcd \u0b9a\u0bcb\u0ba4\u0ba9\u0bc8",
   },
 
   crash: {

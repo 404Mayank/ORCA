@@ -490,17 +490,32 @@ h1 {
 }
 .brew.compact { padding: 10px 13px 11px; gap: 8px; border-radius: 12px; }
 .brew-slot { margin-top: -14px; }
-.brew-bar {
-  height: 2px; border-radius: 1px; background: var(--line);
-  position: relative; overflow: hidden;
+/* --- the stage spine ------------------------------------------------
+   Seven grey checklist rows used to sit above the agent text and win the
+   eye every time, which is backwards: the roadmap is fixed and knowable,
+   the conversation is the part worth reading. It is now a segmented track
+   with one lit label. */
+.brew-spine { display: flex; align-items: center; gap: 10px; }
+.brew-track {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr;
+  gap: 3px; flex: 1; min-width: 0;
 }
-.brew-bar::after {
-  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent,
-    color-mix(in srgb, var(--teal) 75%, transparent), transparent);
-  animation: brew-shimmer 1.8s ease-in-out infinite;
+.brew-seg {
+  height: 3px; border-radius: 2px; background: var(--line);
+  transition: background 0.3s ease;
 }
-@keyframes brew-shimmer { to { transform: translateX(100%); } }
+.brew-seg.done { background: color-mix(in srgb, var(--teal) 55%, transparent); }
+.brew-seg.active {
+  background: var(--teal);
+  animation: brew-breathe 1.4s ease-in-out infinite;
+}
+.brew-stage-now {
+  font-size: 11.5px; color: var(--ink-2); font-weight: 600;
+  white-space: nowrap; flex: none;
+}
+@keyframes brew-breathe { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+
 .brew-head { display: flex; align-items: center; gap: 8px; }
 .brew-title {
   font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace; font-size: 10.5px;
@@ -511,38 +526,94 @@ h1 {
   font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace; font-size: 10px;
   letter-spacing: 0.05em; color: var(--ink-3); font-variant-numeric: tabular-nums;
 }
-.brew-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.brew.compact .brew-stages { gap: 4px; }
-.brew-stage {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12.5px; color: var(--ink-3);
-  transition: color 0.2s ease;
-}
-.brew.compact .brew-stage { font-size: 11.5px; }
-.brew-stage.done { opacity: 0.6; }
-.brew-stage.active { color: var(--ink); font-weight: 600; }
-.brew-mark { width: 13px; flex: none; display: inline-flex; justify-content: center; }
-.brew-stage.done .brew-mark::before { content: "✓"; color: var(--teal); }
-.brew-stage.active .brew-mark::before {
-  content: "●"; color: var(--teal);
-  animation: brew-breathe 1.4s ease-in-out infinite;
-}
-.brew-stage.todo .brew-mark::before { content: "○"; }
-@keyframes brew-breathe { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-.brew-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.brew-agents { display: flex; flex-wrap: wrap; gap: 5px; }
 .brew-agent {
-  font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace; font-size: 10px; letter-spacing: 0.05em;
-  border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px;
+  font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace; font-size: 9.5px; letter-spacing: 0.05em;
+  border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
   color: var(--ink-3); background: var(--paper-2);
   transition: border-color 0.2s ease, color 0.2s ease;
 }
 .brew-agent.active { border-color: var(--teal); color: var(--teal); }
-/* Verbatim agent assessment, verbatim by contract: CSS ellipsis is the
-   only truncation, so the full string stays in the DOM for readers. */
-.brew-say {
-  margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-2);
-  border-left: 2px solid var(--isobath); padding-left: 10px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+
+/* --- the room ---------------------------------------------------------
+   Where the agents actually talk. Scrolls itself so a long deliberation
+   cannot push the composer off the screen; capped so the card keeps a
+   stable height instead of growing under the reader. */
+.brew-room {
+  display: flex; flex-direction: column; gap: 9px;
+  max-height: 210px; overflow-y: auto; padding-right: 4px;
+  scrollbar-width: thin;
+}
+.brew.compact .brew-room { max-height: 148px; }
+.brew-empty { margin: 0; font-size: 12px; color: var(--ink-3); font-style: italic; }
+
+.brew-msg, .brew-flag {
+  display: grid; grid-template-columns: auto 1fr; gap: 4px 8px;
+  align-items: baseline;
+  animation: brew-arrive 0.32s ease both;
+}
+.brew-who {
+  font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace;
+  font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--teal); white-space: nowrap;
+}
+/* Verbatim by contract: these strings are number-stripped at their source,
+   so they are shown whole. No ellipsis, no clamp -- wrapping is the only
+   thing standing between the reader and the full sentence. */
+.brew-text {
+  margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.brew-text.dim { color: var(--ink-2); font-size: 12px; grid-column: 1 / -1; }
+.brew-flag { border-left: 2px solid var(--amber); padding-left: 9px; }
+.brew-flag .brew-who { color: var(--amber); }
+
+/* An agent asking another agent for something. The route line is the whole
+   point of the panel -- it is the only place the multi-agent claim is
+   visible to a user rather than asserted in a README. */
+.brew-ask {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 8px;
+  padding: 6px 9px; border-radius: 9px;
+  background: var(--paper-2); border: 1px solid var(--line-2);
+  animation: brew-arrive 0.32s ease both;
+}
+.brew-route {
+  font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace;
+  font-size: 10px; letter-spacing: 0.05em; color: var(--ink);
+  text-transform: uppercase; white-space: nowrap;
+}
+.brew-route span { color: var(--ai-pink); margin: 0 2px; }
+/* Accepted and run, as opposed to merely proposed by a deliberating agent.
+   The distinction is real -- a proposal can still be rejected by
+   validate_plan -- so the panel shows it rather than flattening the two. */
+.brew-ask.live { border-color: color-mix(in srgb, var(--teal) 45%, var(--line-2)); }
+.brew-tool {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  color: var(--blue); background: color-mix(in srgb, var(--blue) 8%, transparent);
+  border-radius: 5px; padding: 1px 6px;
+}
+.brew-tag {
+  font-family: "IBM Plex Mono", "Noto Sans Tamil", "Latha", "Nirmala UI", monospace;
+  font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase;
+  border-radius: 999px; padding: 1px 7px;
+}
+/* Rule-floor requests were never a model's idea, and a demo audience is
+   entitled to see which is which. */
+.brew-tag.rules {
+  color: var(--ink-2); border: 1px solid var(--line);
+  background: var(--paper);
+}
+/* The typing caret. Decoration only -- the full string is already in the
+   DOM for assistive tech, the reveal is visual. */
+.brew-caret {
+  display: inline-block; width: 2px; height: 0.95em; margin-left: 1px;
+  vertical-align: text-bottom; background: var(--teal);
+  animation: brew-blink 0.9s steps(2) infinite;
+}
+@keyframes brew-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes brew-arrive {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
 }
 /* Busy-line staged dots (pre-first-event fallback on the bridge). */
 .dots { display: inline-flex; gap: 3px; margin-left: 2px; }
@@ -560,8 +631,10 @@ h1 {
   50% { transform: scale(1.06); filter: brightness(1.12); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .brew-bar::after, .dots, .send.waiting { animation: none; display: none; }
-  .brew-stage.active .brew-mark::before { animation: none; }
+  .dots, .send.waiting { animation: none; display: none; }
+  .brew-msg, .brew-ask, .brew-flag { animation: none; }
+  .brew-caret { display: none; }
+  .brew-seg.active { animation: none; }
 }
 
 /* ---------- answer reveal ---------- */
@@ -576,28 +649,71 @@ h1 {
 }
 
 /* ---------- reactive glow ---------- */
-/* Pointer/typing halo. Custom props only (--glow-x/y/on), opacity-only
-   downstream, zero listeners firing when idle. */
-.composer { position: relative; }
-.composer::before {
-  content: ""; position: absolute; inset: 0; border-radius: inherit;
-  background:
-    radial-gradient(
-      240px circle at calc(var(--glow-x, 0.5) * 100%) calc(var(--glow-y, 0.5) * 100%),
-      color-mix(in srgb, var(--teal) 20%, transparent),
-      transparent 70%
-    ),
-    radial-gradient(
-      340px circle at calc((1 - var(--glow-x, 0.5)) * 100%) calc((1 - var(--glow-y, 0.5)) * 100%),
-      color-mix(in srgb, var(--blue) 14%, transparent),
-      transparent 70%
-    );
-  opacity: var(--glow-on, 0);
-  transition: opacity 0.5s ease;
+/* The composer's edge light.
+   Two conic rings around the border, counter-rotating, brightening while
+   the user types. The previous version was a pair of radial washes INSIDE
+   the box: it faded in and out but never moved, so it read as a static
+   smudge behind the text rather than as the box responding.
+
+   Mechanics kept cheap on purpose: the rings are pseudo-elements masked to
+   the border, animation is a single rotating angle, and everything that
+   reacts to typing is an opacity. No layout, no paint of the text, no
+   listener firing while idle -- `useGlow` only writes --glow-on. */
+@property --ring-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.composer {
+  position: relative;
+  /* The spectrum, once, so both rings and any future surface agree. */
+  --ring-stops:
+    var(--teal), var(--blue), var(--ai-pink),
+    color-mix(in srgb, var(--teal) 60%, var(--blue)), var(--teal);
+}
+
+/* The crisp ring: a conic gradient masked down to the border itself. */
+.composer::after {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--ring-angle), var(--ring-stops));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  /* Visible at rest, assertive while typing. A ring that only exists during
+     typing reads as a glitch; one that never changes reads as a border. */
+  opacity: calc(0.28 + var(--glow-on, 0) * 0.72);
+  transition: opacity 0.45s ease;
+  animation: ring-spin 8s linear infinite;
   pointer-events: none;
 }
+
+/* The bloom: the same spectrum, blurred and bleeding outside the box,
+   turning the other way so the two never lock into one rigid sweep. */
+.composer::before {
+  content: ""; position: absolute; inset: -6px; border-radius: calc(20px + 6px);
+  background: conic-gradient(from calc(var(--ring-angle) * -1), var(--ring-stops));
+  filter: blur(14px);
+  opacity: calc(var(--glow-on, 0) * 0.5);
+  transition: opacity 0.5s ease;
+  animation: ring-spin 13s linear infinite reverse;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes ring-spin { to { --ring-angle: 360deg; } }
+
+/* The textarea sits above both rings; the ring is chrome, never a wash
+   behind the words. */
+.composer > * { position: relative; z-index: 1; }
+
 @media (prefers-reduced-motion: reduce) {
   .composer::before, .canvas::after, .frame::after { display: none; }
+  /* The ring stays -- a still spectrum edge is not motion -- but it must
+     not rotate, and it must not pulse with typing either. */
+  .composer::after { animation: none; opacity: 0.45; transition: none; }
   .frame::before { animation: none; opacity: 0.35; }
 }
 /* Backdrop parallax: transform-only drift following the pointer. */

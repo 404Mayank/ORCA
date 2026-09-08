@@ -84,6 +84,81 @@ def test_stream_emits_only_real_stages_in_order(api):
         assert "text" not in event
 
 
+def test_stage_frames_carry_no_digits_anywhere(api):
+    """The agent conversation reaches the browser number-free.
+
+    Stage frames now carry model-written prose -- each agent's assessment,
+    its concerns, and the reason attached to every request it makes of
+    another agent. That prose is rendered verbatim in the wait state, which
+    makes the frames a channel a fabricated figure could travel down:
+    "waves may reach 3 m on the way back" shown live during a turn would be
+    a forecast nobody computed, sitting in the same panel as verified work.
+
+    Every one of those strings is passed through ``strip_numbers`` at its
+    source in ``agents/deliberate.py``. This walks the frames as they leave
+    the socket and proves it, rather than trusting the call sites to keep
+    doing it. Numeric *fields* (seq, round, added, numbers_checked) are
+    typed ints and are not prose; only strings are checked.
+    """
+    blocking = api.post("/chat", json={"query": SAFETY_QUERY, "session_id": "s_digits_probe"})
+    if blocking.json()["state"] != "answer":
+        pytest.skip("needs a working weather cache; run scripts/refresh_cache.py --weather")
+    stages, _ = _stream(api, SAFETY_QUERY, "s_stream_digits")
+
+    def strings(value, path="") -> list[tuple[str, str]]:
+        if isinstance(value, str):
+            return [(path, value)]
+        if isinstance(value, dict):
+            return [x for k, v in value.items() for x in strings(v, f"{path}.{k}")]
+        if isinstance(value, list):
+            return [x for i, v in enumerate(value) for x in strings(v, f"{path}[{i}]")]
+        return []
+
+    offenders = [
+        (path, text)
+        for event in stages
+        for path, text in strings(event)
+        if any(character.isdigit() for character in text)
+    ]
+    assert not offenders, (
+        "a stage frame carried a digit inside model-written prose; it would be "
+        f"rendered verbatim in the wait state: {offenders[:3]}"
+    )
+
+
+def test_deliberate_frames_expose_the_agent_conversation(api):
+    """Assessments, concerns and inter-agent requests all reach the client.
+
+    Without these the wait state can only show that agents *ran*, which is a
+    spinner with extra steps -- it looked identical whether one agent worked
+    or four. The multi-agent claim is only visible if what they said and what
+    they asked each other for actually travels.
+    """
+    blocking = api.post("/chat", json={"query": SAFETY_QUERY, "session_id": "s_convo_probe"})
+    if blocking.json()["state"] != "answer":
+        pytest.skip("needs a working weather cache; run scripts/refresh_cache.py --weather")
+    stages, _ = _stream(api, SAFETY_QUERY, "s_stream_convo")
+
+    deliberations = [e for e in stages if e["stage"] == "deliberate"]
+    assert deliberations, "no agent deliberated; the panel would have nothing to show"
+    for event in deliberations:
+        assert isinstance(event.get("agent"), str) and event["agent"]
+        # Present as keys even when empty -- the client distinguishes "this
+        # agent raised nothing" from "this field was never sent".
+        assert isinstance(event.get("concerns", []), list)
+        assert isinstance(event.get("asks", []), list)
+        for ask in event.get("asks", []):
+            assert set(ask) == {"to_agent", "tool", "reason"}
+
+    for event in [e for e in stages if e["stage"] == "collaborate"]:
+        requests = event.get("requests", [])
+        assert isinstance(requests, list)
+        assert len(requests) <= max(int(event.get("added", 0)), 0) or requests == []
+        for request in requests:
+            assert set(request) == {"from_agent", "to_agent", "tool", "reason", "critical"}
+            assert isinstance(request["critical"], bool)
+
+
 def test_stream_done_matches_blocking(api):
     """Same question, same answer -- the stream adds visibility, not variance."""
     session_b, session_s = "s_stream_block", "s_stream_cmp"

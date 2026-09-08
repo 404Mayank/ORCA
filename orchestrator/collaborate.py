@@ -292,8 +292,16 @@ def _deliberate_all(
         return []
     with ThreadPoolExecutor(max_workers=min(4, len(pending)), thread_name_prefix="orca-deliberate") as pool:
         thoughts = list(pool.map(lambda agent: deliberate(agent, result, intent), pending))
-    # One event per finished deliberation. Assessment text is already
-    # number-stripped at the source; cap length defensively anyway.
+    # One event per finished deliberation. Every string here is written by a
+    # model and every one of them is number-stripped at its source in
+    # agents/deliberate.py (assessment, concerns and each request reason);
+    # lengths are capped there too and again here, defensively.
+    #
+    # `concerns` and `asks` ride along because a progress view that shows only
+    # "the weather agent finished" is a spinner with extra steps. What makes
+    # this system worth watching is *what each agent concluded and what it
+    # then asked another agent for* -- that is the multi-agent claim, and it
+    # was previously flattened into a count.
     if progress is not None:
         for thought in thoughts:
             progress.emit(
@@ -301,6 +309,15 @@ def _deliberate_all(
                 agent=thought.agent,
                 used_llm=bool(thought.used_llm),
                 assessment=(thought.assessment or "")[:300],
+                concerns=[c[:200] for c in (thought.concerns or [])][:3],
+                asks=[
+                    {
+                        "to_agent": request.to_agent,
+                        "tool": request.tool,
+                        "reason": request.reason[:200],
+                    }
+                    for request in (thought.requests or [])[:3]
+                ],
             )
     return thoughts
 
@@ -458,7 +475,24 @@ def run_with_collaboration(
         outcome.plan = validated.plan
         outcome.requests.extend(accepted)
         if progress is not None:
-            progress.emit("collaborate", round=round_number, added=len(accepted))
+            # The accepted requests themselves, not a tally. `critical` marks
+            # the ones the rule floor produced -- those were never a model's
+            # idea and the UI is entitled to say so.
+            progress.emit(
+                "collaborate",
+                round=round_number,
+                added=len(accepted),
+                requests=[
+                    {
+                        "from_agent": request.from_agent,
+                        "to_agent": request.to_agent,
+                        "tool": request.tool,
+                        "reason": request.reason[:200],
+                        "critical": bool(request.critical),
+                    }
+                    for request in accepted[:6]
+                ],
+            )
         outcome.notes.extend(
             f"round {round_number}: {request.describe()}" for request in accepted
         )
