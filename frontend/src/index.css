@@ -13,6 +13,12 @@
 
 :root,
 :root[data-theme="light"] {
+  /* How hard the composer's light presses on its surface. Colour added to a
+     white panel has nowhere to hide -- the same alpha that reads as a hint
+     over deep navy reads as a stain over paper, and it lands right on the
+     hint row. Halved for light rather than retuned per gradient, so the two
+     themes stay one effect. */
+  --wash: 0.46;
   --shell: #d7dfe1;
   --chart: #ebf0f0;
   --paper: #ffffff;
@@ -41,6 +47,7 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
+  --wash: 1;
   --shell: #050d11;
   --chart: #0a191f;
   --paper: #102229;
@@ -453,7 +460,11 @@ h1 {
   border-radius: 20px; padding: 16px 16px 12px; box-shadow: var(--lift);
   transition: border-color 0.18s ease;
 }
-.composer:focus-within { border-color: var(--teal); }
+/* A quiet edge. The light around and across the panel is the focus signal
+   now; a saturated teal outline on top of it read as two competing effects. */
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--teal) 38%, var(--line));
+}
 .composer textarea {
   width: 100%; border: 0; background: none; resize: none; outline: none;
   font-family: inherit; font-size: 16px; line-height: 1.5; color: var(--ink);
@@ -649,71 +660,146 @@ h1 {
 }
 
 /* ---------- reactive glow ---------- */
-/* The composer's edge light.
-   Two conic rings around the border, counter-rotating, brightening while
-   the user types. The previous version was a pair of radial washes INSIDE
-   the box: it faded in and out but never moved, so it read as a static
-   smudge behind the text rather than as the box responding.
+/* The composer's light.
+   Soft colour that drifts, breathes and leaks -- outward onto the page and
+   inward across the panel's own surface -- rather than a ring drawn on the
+   border. The previous attempt masked a conic gradient down to the border
+   and read as a hard rainbow outline: it moved, but it was an *edge*, not a
+   light source. Before that it was a pair of radial washes that never moved
+   at all.
 
-   Mechanics kept cheap on purpose: the rings are pseudo-elements masked to
-   the border, animation is a single rotating angle, and everything that
-   reacts to typing is an opacity. No layout, no paint of the text, no
-   listener firing while idle -- `useGlow` only writes --glow-on. */
-@property --ring-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
+   The shape of the effect:
+
+   * Three blobs, each on its own drift timeline (17s / 23s / 13s, all
+     coprime-ish so they never resynchronise). Positions animate through
+     registered custom properties, which is what makes the motion organic
+     instead of a rotation.
+   * Their centres stay at or beyond the panel's edges -- y near -10% or
+     110%, x pinned to the flanks. That is the readability rule expressed
+     geometrically: colour gathers in the corners and along the top and
+     bottom, and the middle band, where the text actually sits, stays clear.
+   * Two surfaces. ::before blooms outward behind the panel; ::after washes
+     across the panel's face, under the text, clipped by the same radius.
+   * Alpha is deliberately low and breathes on a fourth, slower period, so
+     the whole thing swells and settles instead of holding one level.
+
+   Cost stays where it was: no layout, no listener while idle, and the only
+   thing typing changes is opacity. `useGlow` still writes only --glow-on. */
+@property --g1x { syntax: "<percentage>"; initial-value: 12%; inherits: false; }
+@property --g1y { syntax: "<percentage>"; initial-value: -8%; inherits: false; }
+@property --g2x { syntax: "<percentage>"; initial-value: 88%; inherits: false; }
+@property --g2y { syntax: "<percentage>"; initial-value: 108%; inherits: false; }
+@property --g3x { syntax: "<percentage>"; initial-value: 65%; inherits: false; }
+@property --g3y { syntax: "<percentage>"; initial-value: -12%; inherits: false; }
+@property --g-swell { syntax: "<number>"; initial-value: 1; inherits: false; }
 
 .composer {
   position: relative;
-  /* The spectrum, once, so both rings and any future surface agree. */
-  --ring-stops:
-    var(--teal), var(--blue), var(--ai-pink),
-    color-mix(in srgb, var(--teal) 60%, var(--blue)), var(--teal);
+  /* Contain the stack so ::before can sit behind the panel without
+     escaping into whatever is painted under the page. */
+  isolation: isolate;
 }
 
-/* The crisp ring: a conic gradient masked down to the border itself. */
+/* The three blobs, written once. Both surfaces paint the same light; they
+   differ only in scale, blur and how far they reach. */
+.composer::before,
 .composer::after {
-  content: ""; position: absolute; inset: -1px; border-radius: inherit;
-  padding: 1.5px;
-  background: conic-gradient(from var(--ring-angle), var(--ring-stops));
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  /* Visible at rest, assertive while typing. A ring that only exists during
-     typing reads as a glitch; one that never changes reads as a border. */
-  opacity: calc(0.28 + var(--glow-on, 0) * 0.72);
-  transition: opacity 0.45s ease;
-  animation: ring-spin 8s linear infinite;
+  content: ""; position: absolute; border-radius: inherit;
   pointer-events: none;
+  /* Wide but SHORT. Height is the readability control: a blob 130% tall
+     reaches the middle of the panel no matter where its centre sits, which
+     is how the first version ended up washing colour straight through the
+     text. At ~55% it can only ever stain the band nearest its own edge. */
+  background:
+    radial-gradient(
+      46% 58% at var(--g1x) var(--g1y),
+      color-mix(in srgb, var(--teal) 30%, transparent), transparent 72%
+    ),
+    radial-gradient(
+      50% 62% at var(--g2x) var(--g2y),
+      color-mix(in srgb, var(--ai-pink) 24%, transparent), transparent 70%
+    ),
+    radial-gradient(
+      42% 52% at var(--g3x) var(--g3y),
+      color-mix(in srgb, var(--blue) 26%, transparent), transparent 74%
+    );
+  animation:
+    g-drift-1 17s ease-in-out infinite alternate,
+    g-drift-2 23s ease-in-out infinite alternate,
+    g-drift-3 13s ease-in-out infinite alternate,
+    g-swell 9s ease-in-out infinite alternate;
 }
 
-/* The bloom: the same spectrum, blurred and bleeding outside the box,
-   turning the other way so the two never lock into one rigid sweep. */
+/* Outward bloom. Sits behind the panel's own opaque background, so it is
+   only ever seen spilling past the edges -- the halo on the page. */
 .composer::before {
-  content: ""; position: absolute; inset: -6px; border-radius: calc(20px + 6px);
-  background: conic-gradient(from calc(var(--ring-angle) * -1), var(--ring-stops));
-  filter: blur(14px);
-  opacity: calc(var(--glow-on, 0) * 0.5);
-  transition: opacity 0.5s ease;
-  animation: ring-spin 13s linear infinite reverse;
-  pointer-events: none;
+  inset: -26px;
+  border-radius: 34px;
+  filter: blur(26px);
+  opacity: calc((0.4 + var(--glow-on, 0) * 0.55) * var(--g-swell) * var(--wash, 1));
+  transition: opacity 0.55s ease;
   z-index: -1;
 }
 
-@keyframes ring-spin { to { --ring-angle: 360deg; } }
+/* Inward wash. Above the panel background, below the text. No blur: the
+   gradients are already soft, and blurring here would bleed past the
+   rounded corners and undo the shape. */
+.composer::after {
+  inset: 0;
+  /* Half the bloom's strength. This surface is the one with text on top of
+     it, so it is tuned to be felt rather than seen -- the eye should notice
+     the panel is lit, not read a colour. */
+  opacity: calc((0.3 + var(--glow-on, 0) * 0.3) * var(--g-swell) * var(--wash, 1));
+  transition: opacity 0.5s ease;
+  z-index: 0;
+  /* Fade the wash out of the vertical middle regardless of where the blobs
+     drift. Belt and braces with the height limit above: the geometry keeps
+     colour at the edges, this guarantees it. */
+  --wash-mask: linear-gradient(
+    to bottom,
+    #000 0%,
+    rgba(0, 0, 0, 0.16) 40%,
+    rgba(0, 0, 0, 0.16) 78%,
+    #000 100%
+  );
+  -webkit-mask: var(--wash-mask);
+  mask: var(--wash-mask);
+}
 
-/* The textarea sits above both rings; the ring is chrome, never a wash
-   behind the words. */
+@keyframes g-drift-1 {
+  0%   { --g1x: 6%;  --g1y: -10%; }
+  50%  { --g1x: 34%; --g1y: 4%; }
+  100% { --g1x: 18%; --g1y: 112%; }
+}
+@keyframes g-drift-2 {
+  0%   { --g2x: 94%; --g2y: 110%; }
+  50%  { --g2x: 62%; --g2y: 96%; }
+  100% { --g2x: 82%; --g2y: -8%; }
+}
+@keyframes g-drift-3 {
+  0%   { --g3x: 70%; --g3y: -14%; }
+  50%  { --g3x: 44%; --g3y: -2%; }
+  100% { --g3x: 96%; --g3y: 60%; }
+}
+/* The breath. Slower than every drift, so the swell never lines up with a
+   blob arriving somewhere -- that coincidence is what makes an effect read
+   as a loop. */
+@keyframes g-swell {
+  0%   { --g-swell: 0.72; }
+  100% { --g-swell: 1.12; }
+}
+
+/* Text and controls ride above the wash. Non-negotiable: the light is
+   allowed onto the panel's face, never in front of a word. */
 .composer > * { position: relative; z-index: 1; }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer::before, .canvas::after, .frame::after { display: none; }
-  /* The ring stays -- a still spectrum edge is not motion -- but it must
-     not rotate, and it must not pulse with typing either. */
-  .composer::after { animation: none; opacity: 0.45; transition: none; }
+  .canvas::after, .frame::after { display: none; }
+  /* The light stays -- a still wash is not motion -- but nothing drifts,
+     breathes, or reacts to typing. */
+  .composer::before, .composer::after { animation: none; transition: none; }
+  .composer::after { opacity: 0.5; }
+  .composer::before { opacity: 0.32; }
   .frame::before { animation: none; opacity: 0.35; }
 }
 /* Backdrop parallax: transform-only drift following the pointer. */
