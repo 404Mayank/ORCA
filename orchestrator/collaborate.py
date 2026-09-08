@@ -310,6 +310,11 @@ def _deliberate_all(
                 used_llm=bool(thought.used_llm),
                 assessment=(thought.assessment or "")[:300],
                 concerns=[c[:200] for c in (thought.concerns or [])][:3],
+                # Figures this agent reached for that no tool returned, and
+                # the fragments they cost. Almost always empty. Non-empty is
+                # the signal the old digit-stripping guard could not produce:
+                # it erased the number mid-sentence and told nobody.
+                rejected=[r[:24] for r in (thought.rejected or [])][:5],
                 asks=[
                     {
                         "to_agent": request.to_agent,

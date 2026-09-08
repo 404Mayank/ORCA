@@ -106,22 +106,59 @@ def test_every_domain_agent_has_a_deliberation_prompt():
         assert "{TOOLS}" not in prompt, "the tool catalogue must be injected"
 
 
-def test_every_deliberation_prompt_forbids_numbers():
-    """The governing rule, enforced at the prompt and again in code.
+def test_every_deliberation_prompt_binds_numbers_to_tool_output():
+    """The governing rule, stated in the prompt and enforced in code.
 
-    A domain agent's words reach the user as caveats, which is exactly where an
-    invented figure would look most authoritative. The prompt says not to;
-    strip_numbers() makes sure.
+    The rule used to be "never write a number", and the code deleted digits
+    to make sure. That was safe and it made every agent vague, because
+    specificity in this domain is numeric -- an agent forbidden from writing
+    2.2 m can only write "close to the limit".
+
+    The rule is now "every number you write must be one your tools returned",
+    and the code checks rather than edits. Strictly safer: a deleted digit
+    hides that a model reached for a figure it did not have, a rejected
+    fragment is a signal you can count.
     """
-    from agents.deliberate import _prompt_for, strip_numbers
+    from agents.deliberate import _prompt_for
 
     for agent in all_agents():
         prompt = _prompt_for(agent)
-        assert "never write a number" in prompt.lower(), agent.name
+        lowered = prompt.lower()
+        assert "must be one your tools actually returned" in lowered, agent.name
+        # The old blanket ban must not creep back in alongside the new rule;
+        # the two instructions contradict each other and the model would be
+        # right to obey the stricter one.
+        assert "you may never write a number" not in lowered, agent.name
 
-    assert strip_numbers("waves may reach 3.5 m") == "waves may reach m"
-    assert strip_numbers("the zone is 55 km out") == "the zone is km out"
-    assert strip_numbers("check the route home") == "check the route home"
+
+def test_a_figure_no_tool_returned_costs_its_fragment():
+    """Kept when real, dropped whole when not. Never edited."""
+    from agents.grounding import grounded
+
+    pool = [2.24, 25.0, 18.7]
+    assert grounded("swell 2.2 m against the 25 kn limit", pool)[0] == (
+        "swell 2.2 m against the 25 kn limit"
+    )
+    assert grounded("waves may reach 3.5 m", pool) == ("", ["3.5"])
+    assert grounded("check the route home", pool)[0] == "check the route home"
+    # Rounding to a precision the tool never supports is invention too:
+    # 2.3 is not a correct rounding of 2.24 at one decimal place.
+    assert grounded("swell 2.3 m", pool) == ("", ["2.3"])
+
+
+def test_the_guard_never_mangles_a_sentence():
+    """The failure mode of the old guard, pinned so it cannot return.
+
+    strip_numbers turned "within 20 km" into "within  km" -- a sentence that
+    reads as a typo and quietly conceals that a model invented a distance.
+    Whatever survives now is what the model wrote, unedited.
+    """
+    from agents.grounding import grounded
+
+    for text in ("within 20 km", "gusting to 40 kn by noon", "about 3 hours out"):
+        kept, bad = grounded(text, [])
+        assert bad, text
+        assert kept == "", f"a rejected fragment must vanish, not erode: {kept!r}"
 
 
 def test_a_deliberating_agent_cannot_mark_its_own_request_critical():

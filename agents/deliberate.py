@@ -28,13 +28,16 @@ Concretely, its output is:
   turned into a plan step and put through the same ``validate_plan()`` as
   anything else, so it cannot invent a tool, mis-type an argument, or mark its
   own request safety-critical.
-* ``concerns`` -- sentences for the caveat block. **Any number in a concern is
-  stripped**, because a caveat reading "waves may reach 3 m" would be a safety
-  figure produced by a language model. See :func:`strip_numbers`.
+* ``concerns`` -- sentences for the caveat block. **Every number in a concern
+  is checked against the tool call log, and the concern is dropped if a figure
+  is not there.** See :mod:`agents.grounding` for why checking beat the
+  earlier approach of deleting digits outright.
 * ``assessment`` -- one line for the reasoning trace, same treatment.
 
-So the model may say *"the zone is far offshore for this boat, check the route
-home"*. It may not say *how* far, or *how* long. Those come from tools.
+So the model may say *"the swell is the binding driver at 2.2 m against the
+2.5 m limit"* when the tools returned those numbers, and may not say it when
+they did not. It is allowed to be exactly as specific as its evidence, which
+is a stronger position than the old rule of never being specific at all.
 
 ---------------------------------------------------------------------------
 THE HARDCODED FLOOR STAYS
@@ -57,6 +60,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from agents.grounding import grounded
+from core import config
 from orchestrator.llm import client as llm
 from tools import registry
 
@@ -93,10 +98,111 @@ class Deliberation:
     ok: bool = False
     error: str | None = None
     model: str = ""
+    #: Figures this agent wrote that no tool returned, and the fragments they
+    #: cost. Empty on the overwhelming majority of turns. Non-empty is worth
+    #: reading: it is a model reaching for a number it does not have, which
+    #: used to be silently erased mid-sentence and is now countable.
+    rejected: list[str] = field(default_factory=list)
 
     @property
     def used_llm(self) -> bool:
         return self.ok and bool(self.model)
+
+
+def _shown_numbers(findings_json: str) -> list[float]:
+    """Every number in the block this agent was actually handed.
+
+    **Not** every number the turn produced. Scoping to the whole tool call
+    log looked equivalent and was not: it let an agent quote a figure from a
+    domain it never saw, and worse, it let one quote another tool's internal
+    intermediates. Observed live on the first run -- the risk agent, whose
+    fragment carries normalised sub-scores, reported *"wind speed is 0.0666"*.
+    That number was real, it was in the log, and it is a weighting, not a
+    wind speed. A grounding check cannot catch a mislabelled number; the only
+    defence is to narrow what an agent can reach for.
+
+    So the contract is the simplest one available, and the one a reader can
+    hold in their head: **you may quote back what you were shown.**
+    """
+    pool: list[float] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, bool):
+            return
+        if isinstance(node, (int, float)):
+            pool.append(float(node))
+        elif isinstance(node, str):
+            # Figures live inside strings too: the vessel class arrives as
+            # "frp_9m", and an agent describing "a 9 m FRP boat" is quoting
+            # what it was told, not inventing a hull.
+            for token in _NUMBER.findall(node):
+                try:
+                    pool.append(float(token.replace(",", "")))
+                except ValueError:
+                    continue
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    try:
+        walk(json.loads(findings_json))
+    except (ValueError, json.JSONDecodeError):
+        pass
+    return pool + _threshold_numbers()
+
+
+def _threshold_numbers() -> list[float]:
+    """Every limit in ``config/risk_thresholds.yaml``.
+
+    Always quotable, by any agent, whether or not its own fragment happened
+    to carry them. These are not model output and not tool output -- they are
+    hand-authored config with a citation per entry, which is precisely the
+    file we open when a judge asks why 2.5 m. An agent saying "under the
+    2.5 m limit" is reading the rulebook, and the geospatial agent knowing
+    the limit without having run the wave tool is correct, not a leak.
+    """
+    global _THRESHOLDS_CACHE
+    if _THRESHOLDS_CACHE is None:
+        found: list[float] = []
+
+        def walk(node: Any) -> None:
+            if isinstance(node, bool):
+                return
+            if isinstance(node, (int, float)):
+                found.append(float(node))
+            elif isinstance(node, dict):
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        try:
+            walk(config.load_yaml("risk_thresholds.yaml"))
+        except Exception:  # noqa: BLE001 -- a missing config narrows the pool, never breaks a turn
+            found = []
+        _THRESHOLDS_CACHE = found
+    return _THRESHOLDS_CACHE
+
+
+#: Parsed once. The file is a deliverable that changes between releases, not
+#: between turns.
+_THRESHOLDS_CACHE: list[float] | None = None
+
+
+def _ground(text: str, pool: list[float], rejected: list[str]) -> str:
+    """The fragment if every number in it is real, else the empty string.
+
+    Records what was thrown away. The three call sites all already had to
+    handle "the model said nothing useful here", so rejection reuses that
+    path rather than introducing a second failure mode.
+    """
+    kept, bad = grounded(text.strip(), pool)
+    rejected.extend(bad)
+    return kept
 
 
 def strip_numbers(text: str) -> str:
@@ -208,7 +314,8 @@ def deliberate(
     if system is None:
         return Deliberation(agent=agent.name, error="no prompt file")
 
-    completion = llm.complete("deliberator", system, _findings_block(agent, result, intent))
+    shown = _findings_block(agent, result, intent)
+    completion = llm.complete("deliberator", system, shown)
     if not completion.ok:
         return Deliberation(agent=agent.name, error=completion.error or "llm unavailable")
 
@@ -216,6 +323,9 @@ def deliberate(
         assessment, raw_requests, concerns = _parse(completion.text, agent)
     except (ValueError, json.JSONDecodeError) as exc:
         return Deliberation(agent=agent.name, error=f"unparseable: {exc}")
+
+    pool = _shown_numbers(shown)
+    rejected: list[str] = []
 
     requests: list[AgentRequest] = []
     for item in raw_requests[:MAX_REQUESTS]:
@@ -236,7 +346,14 @@ def deliberate(
                 to_agent=str(item.get("to_agent") or registry.get(tool).agent),
                 tool=tool,
                 args=args,
-                reason=strip_numbers(str(item.get("reason") or "requested by agent")),
+                # A reason with an invented figure loses the reason, never
+                # the request: the request carries structured arguments that
+                # validate_plan checks far more strictly than any prose, and
+                # dropping a safety-relevant tool call because its rationale
+                # was badly worded would be the guard doing harm.
+                reason=_ground(
+                    str(item.get("reason") or ""), pool, rejected
+                ) or "requested by agent",
                 # A model may never mark its own request safety-critical.
                 # Critical requests come from the rule floor, which is not
                 # subject to a model's judgement on the day.
@@ -244,20 +361,24 @@ def deliberate(
             )
         )
 
+    # A concern is kept whole or not at all. Under the old stripping guard a
+    # concern that was mostly digits -- "waves 3.5 m, gusts 28 kn" -- eroded
+    # to punctuation, and an empty Caveat fails validation and took the whole
+    # recommendation with it; the length floor existed to catch that wreckage.
+    # Nothing erodes now, so the floor only has to reject a genuinely empty
+    # string, but it is kept: a model can still return " ".
+    kept_concerns = [
+        text
+        for c in concerns
+        if len(text := _ground(str(c)[:200], pool, rejected)) >= _MIN_CONCERN_CHARS
+    ][:3]
+
     return Deliberation(
         agent=agent.name,
-        assessment=strip_numbers(assessment)[:300],
+        assessment=_ground(assessment[:300], pool, rejected),
         requests=requests,
-        # Filtered AFTER stripping, not before. A concern that is mostly digits
-        # -- "waves 3.5 m, gusts 28 kn" -- strips down to punctuation or to
-        # nothing at all, and an empty Caveat fails validation and takes the
-        # whole recommendation with it. The guard exists to make answers safe;
-        # it must not be able to destroy one.
-        concerns=[
-            stripped
-            for c in concerns
-            if len(stripped := strip_numbers(str(c))[:200]) >= _MIN_CONCERN_CHARS
-        ][:3],
+        concerns=kept_concerns,
         ok=True,
         model=completion.model,
+        rejected=rejected,
     )

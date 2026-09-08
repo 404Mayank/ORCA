@@ -108,11 +108,49 @@ def test_hygiene_rejects_mangled_remnants():
     assert apply_hygiene(["fish the next 2 days please"]) == []
 
 
-def test_model_digits_stripped_end_to_end(monkeypatch):
+def test_a_suggestion_may_name_a_figure_the_answer_made(monkeypatch):
+    """The fixture answer reports wind 15-20 kn, so this button is legitimate.
+
+    It is also the exact suggestion the old digit-stripping guard destroyed:
+    "Is 15 kn too much for my boat today?" is a real question a skipper would
+    tap, and it was reduced to "Is kn too much for my boat today?" and then
+    binned as a fragment. Nothing was unsafe about it; the guard could not
+    tell the difference because it never looked.
+    """
     _stub_complete(monkeypatch, '["Is 15 kn too much for my boat today?"]')
     out = suggest_followups(_rec(), _intent())
-    for text in out.texts:
-        assert not re.search(r"\d", text)
+    assert any("15 kn" in text for text in out.texts), out.texts
+
+
+def test_a_suggestion_inventing_a_figure_is_dropped(monkeypatch):
+    """A number the answer never made implies a finding nobody computed.
+
+    A suggestion sits directly under the answer and reads as continuous with
+    it, so "gusting past 47 kn" reads as something the system found.
+    """
+    _stub_complete(monkeypatch, '["Is it safe if the wind gusts past 47 kn tonight?"]')
+    out = suggest_followups(_rec(), _intent())
+    assert not any("47" in text for text in out.texts), out.texts
+    # The layer below fills in; the user is never left with no buttons.
+    assert out.texts
+
+
+def test_a_suggestion_may_quote_the_answer_back(monkeypatch):
+    """The point of checking instead of deleting: real figures survive.
+
+    Under the old guard every digit was erased, so a follow-up could never
+    name the number the fisherman was actually looking at.
+    """
+    from agents.suggest import answer_numbers, apply_hygiene
+
+    rec = _rec()
+    pool = answer_numbers(rec)
+    assert pool, "the fixture answer carries no figures; the test proves nothing"
+    quoted = f"Is it still safe if the swell holds at {pool[0]:g}?"
+    assert apply_hygiene([quoted], pool) == [quoted]
+    # ... and the same sentence with a figure the answer never made does not.
+    invented = "Is it still safe if the swell holds at 9.87?"
+    assert apply_hygiene([invented], pool) == []
 
 
 # ==========================================================================

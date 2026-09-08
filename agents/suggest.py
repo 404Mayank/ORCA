@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents.deliberate import strip_numbers
+from agents.grounding import grounded
 
 __all__ = [
     "MAX_SUGGESTIONS",
@@ -205,21 +206,51 @@ def parse_model_suggestions(text: str) -> list[str]:
     return [str(item) for item in data if isinstance(item, (str, int, float)) and not isinstance(item, bool)]
 
 
-def apply_hygiene(items: list[str]) -> list[str]:
-    """Number-strip, drop fragments, order-preserving dedupe, cap.
+def answer_numbers(recommendation) -> list[float]:
+    """Every figure the verified answer actually contains.
+
+    A tighter pool than the one deliberation uses. A suggestion is a button a
+    fisherman taps, and it is read as continuous with the answer above it, so
+    it may only reference numbers that answer really made -- not everything
+    some tool happened to return on the way.
+    """
+    pool: list[float] = []
+    for block in ("claims", "drivers", "negative_findings", "operational_guidance",
+                  "alternatives", "hypotheses"):
+        for item in getattr(recommendation, block, None) or []:
+            slots = getattr(item, "slots", None) or {}
+            pool.extend(
+                float(v) for v in slots.values()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            )
+            evaluation = getattr(item, "evaluation", None)
+            threshold = getattr(evaluation, "threshold", None) if evaluation else None
+            if threshold is not None and isinstance(getattr(threshold, "value", None), (int, float)):
+                pool.append(float(threshold.value))
+    return pool
+
+
+def apply_hygiene(items: list[str], pool: list[float] | None = None) -> list[str]:
+    """Check numbers, drop fragments, order-preserving dedupe, cap.
 
     Runs on model output AND on rule/static backfill candidates, because a
     template filled from a future slot and a static string are both capable
     of carrying a digit the day someone edits them.
+
+    ``pool`` is the set of figures the answer itself made. A suggestion
+    carrying any other number is dropped whole rather than mangled -- see
+    :mod:`agents.grounding`. Omitting the pool means no number is grounded,
+    which is the right default for a caller with no answer in hand.
     """
     seen: dict[str, None] = {}
     for item in items:
-        cleaned = strip_numbers(str(item)).strip()
+        cleaned, _ = grounded(str(item).strip(), pool or [])
         if not cleaned or len(cleaned) < MIN_SUGGESTION_CHARS:
             continue
-        # A mangled remnant (double space, dangling hyphen, or a quantity
-        # word orphaned by its number -- "the next days") is a broken
-        # button, not a cleaned one.
+        # Left in place as belt and braces. These patterns were the wreckage
+        # digit-stripping used to leave behind ("the next  days"), which no
+        # longer happens -- nothing is edited now, only kept or dropped. They
+        # still catch a genuinely malformed static string.
         if "  " in cleaned or re.search(r"-\s*(day|days|week|hour|kn|m)\b", cleaned):
             continue
         if re.search(r"\b(next|last|past|over|under|about|around|within|above|below)\s+(days?|weeks?|hours?|minutes?|km)\b", cleaned):
@@ -239,17 +270,19 @@ class Suggestions:
     was drawn from more than one source, in any combination."""
 
 
-def _assemble(candidates: list[tuple[list[str], str]]) -> Suggestions:
+def _assemble(
+    candidates: list[tuple[list[str], str]], pool: list[float] | None = None
+) -> Suggestions:
     """Merge ordered (items, source) layers into a capped button set.
 
     Layers apply in order; the first layer is primary. Every layer is
-    hygiene-filtered. ``mixed`` iff more than one layer contributed a
-    button that survived.
+    hygiene-filtered against ``pool`` -- the figures the answer itself made.
+    ``mixed`` iff more than one layer contributed a button that survived.
     """
     picked: list[str] = []
     used: list[str] = []
     for items, source in candidates:
-        fresh = [t for t in apply_hygiene(items) if t not in picked]
+        fresh = [t for t in apply_hygiene(items, pool) if t not in picked]
         if fresh:
             picked.extend(fresh[: MAX_SUGGESTIONS - len(picked)])
             used.append(source)
@@ -274,13 +307,17 @@ def suggest_followups(recommendation, intent, prior_options: list[str] | None = 
     from orchestrator.llm import client as llm
 
     prior = [p for p in (prior_options or []) if p]
-    rules = [t for t in apply_hygiene(rule_suggestions(intent)) if t not in prior]
-    static = [t for t in apply_hygiene(list(SUGGESTIONS)) if t not in prior]
+    # The answer's own figures. A suggestion may quote one of these back --
+    # "is it still safe if the gusts hold at 18.7 kn?" is a question worth
+    # offering -- and may not invent any other.
+    pool = answer_numbers(recommendation)
+    rules = [t for t in apply_hygiene(rule_suggestions(intent), pool) if t not in prior]
+    static = [t for t in apply_hygiene(list(SUGGESTIONS), pool) if t not in prior]
 
     if not any(llm.provider_status().values()):
         # No provider configured: the model is never attempted. The answer
         # is the deterministic floor, honestly labelled.
-        return _assemble([(static, "static")])
+        return _assemble([(static, "static")], pool)
 
     try:
         ctx = _context(intent)
@@ -300,12 +337,15 @@ def suggest_followups(recommendation, intent, prior_options: list[str] | None = 
     model_texts: list[str] = []
     model_ok = result is not None and getattr(result, "ok", False)
     if model_ok:
-        model_texts = [t for t in apply_hygiene(parse_model_suggestions(result.text)) if t not in prior]
+        model_texts = [
+            t for t in apply_hygiene(parse_model_suggestions(result.text), pool)
+            if t not in prior
+        ]
 
     if model_ok and model_texts:
-        return _assemble([(model_texts, "model"), (rules, "rules"), (static, "static")])
+        return _assemble([(model_texts, "model"), (rules, "rules"), (static, "static")], pool)
     if model_ok:
         # The model answered but nothing survived hygiene: its voice is
         # absent from the buttons, so the set is rules-led, not mixed.
-        return _assemble([(rules, "rules"), (static, "static")])
-    return _assemble([(rules, "rules"), (static, "static")])
+        return _assemble([(rules, "rules"), (static, "static")], pool)
+    return _assemble([(rules, "rules"), (static, "static")], pool)

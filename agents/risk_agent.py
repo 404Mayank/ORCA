@@ -103,7 +103,20 @@ class RiskAgent(Agent):
                         result, step_id, "verdict", "risk.verdict",
                         {
                             "verdict": output.verdict,
-                            "score": output.score,
+                            # `score` and per-driver `contribution` are gone
+                            # on purpose. They are normalised weights for the
+                            # threshold function -- unitless, and meaningless
+                            # to a fisherman. While they were in this block a
+                            # deliberating agent read one and reported it as a
+                            # measurement: *"wind speed is 0.0666"*. That is
+                            # not something a grounding check can catch, since
+                            # the figure is perfectly real; it is a labelling
+                            # error, and the only durable fix is that a model
+                            # never sees a number it must not quote.
+                            #
+                            # What replaces them is what the agent should have
+                            # been reasoning about anyway: the observed value,
+                            # its unit, and the limit it is judged against.
                             "band": output.band,
                             "limiting_driver": output.limiting_driver,
                             "downgraded": output.downgraded,
@@ -111,7 +124,10 @@ class RiskAgent(Agent):
                             "drivers": [
                                 {
                                     "id": c.driver_id,
-                                    "contribution": c.contribution,
+                                    "observed_min": c.evaluation.observed.min,
+                                    "observed_max": c.evaluation.observed.max,
+                                    "unit": c.evaluation.observed.unit.value,
+                                    "limit": c.evaluation.threshold.value,
                                     "breaching": c.evaluation.breaching,
                                 }
                                 for c in output.contributions

@@ -147,6 +147,7 @@ def test_deliberate_frames_expose_the_agent_conversation(api):
         # agent raised nothing" from "this field was never sent".
         assert isinstance(event.get("concerns", []), list)
         assert isinstance(event.get("asks", []), list)
+        assert isinstance(event.get("rejected", []), list)
         for ask in event.get("asks", []):
             assert set(ask) == {"to_agent", "tool", "reason"}
 
