@@ -29,13 +29,36 @@ export interface Readiness {
   bbox: [number, number, number, number];
 }
 
+/**
+ * Total budget for one blocking turn. Generous -- a paid-tier turn with two
+ * collaboration rounds genuinely takes tens of seconds -- but finite, because
+ * a request that never settles leaves the conversation that made it stuck
+ * answering forever, with no way back except a page reload.
+ */
+const ASK_BUDGET_MS = 180_000;
+
+/**
+ * No frame for this long means the stream is dead rather than slow. Unlike a
+ * total budget this is safe to keep short: a live turn emits stage frames
+ * continuously, so silence is a real signal and not just a long computation.
+ */
+const STREAM_STALL_MS = 45_000;
+
 /** One question. Never throws for a domain failure — the API returns a state. */
 export async function ask(request: ChatRequest): Promise<ChatResponse> {
-  const response = await fetch("/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
+  const abort = new AbortController();
+  const budget = setTimeout(() => abort.abort(), ASK_BUDGET_MS);
+  let response: Response;
+  try {
+    response = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+      signal: abort.signal,
+    });
+  } finally {
+    clearTimeout(budget);
+  }
   if (!response.ok) {
     // A non-200 is an infrastructure failure (server down), not a refusal.
     // Refusals and clarifications arrive as 200 with a state, by design.
@@ -165,14 +188,27 @@ export async function askStream(
   request: ChatRequest,
   onEvent: (event: StreamEvent) => void,
 ): Promise<ChatResponse> {
+  // Reset on every frame. An abort surfaces as StreamFailed, which the caller
+  // already handles by falling back to the blocking route -- so a stalled
+  // stream costs a retry, never a wedged conversation.
+  const abort = new AbortController();
+  let stall: ReturnType<typeof setTimeout> | undefined;
+  const armStall = () => {
+    clearTimeout(stall);
+    stall = setTimeout(() => abort.abort(), STREAM_STALL_MS);
+  };
+
   let response: Response;
   try {
+    armStall();
     response = await fetch("/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
       body: JSON.stringify(request),
+      signal: abort.signal,
     });
   } catch {
+    clearTimeout(stall);
     throw new StreamFailed("unreachable");
   }
   if (!response.ok || !response.body) throw new StreamFailed(`status ${response.status}`);
@@ -182,7 +218,10 @@ export async function askStream(
   const pump = async (): Promise<ChatResponse> => {
     for (;;) {
       const { done, value } = await reader.read();
-      if (value) buffer += decoder.decode(value, { stream: !done });
+      if (value) {
+        armStall();
+        buffer += decoder.decode(value, { stream: !done });
+      }
       let idx: number;
       while ((idx = buffer.indexOf("\n\n")) >= 0) {
         const chunk = buffer.slice(0, idx);
@@ -212,6 +251,8 @@ export async function askStream(
   } catch (error) {
     if (error instanceof StreamFailed) throw error;
     throw new StreamFailed(String(error));
+  } finally {
+    clearTimeout(stall);
   }
 }
 

@@ -79,6 +79,10 @@ function validOrigin(origin: { lat: unknown; lon: unknown } | null | undefined):
   );
 }
 
+//: Stable empty trace. A new [] each render would re-fire every effect
+//: and memo that depends on it.
+const EMPTY_TRACE: StreamEvent[] = [];
+
 export default function App() {
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   // Locale mirrors theme: persisted preference, applied instantly. The
@@ -90,13 +94,19 @@ export default function App() {
   const [sheet, setSheet] = useState<SheetKey | null>(null);
   const [sheetReturnFocus, setSheetReturnFocus] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [busy, setBusy] = useState(false);
+  // In-flight requests keyed by the session that owns them. A single global
+  // `busy` flag caused three separate faults: a second question was refused
+  // while any first one flew, switching conversations left the composer dead
+  // until the original request landed (forever, if its stream hung), and the
+  // bridge painted the thread's progress on the front page. Progress belongs
+  // to a conversation, not to the app.
+  const [pending, setPending] = useState<Record<string, boolean>>({});
   const [status, setStatus] = useState<Readiness | null>(null);
   const [settings, setSettings] = useState<TierSettings | null>(null);
   const [imbl, setImbl] = useState<Array<[number, number]> | null>(null);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [panel, setPanel] = useState<"map" | "evidence" | null>(null);
-  const [trace, setTrace] = useState<StreamEvent[]>([]);
+  const [traces, setTraces] = useState<Record<string, StreamEvent[]>>({});
   const [drawer, setDrawer] = useState<Recommendation | null>(null);
   const [mapFor, setMapFor] = useState<Recommendation | null>(null);
   const [turns, setTurns] = useState<SessionTurn[]>([]);
@@ -104,6 +114,10 @@ export default function App() {
   const [saved, setSaved] = useState<SavedAnswer[]>(() => loadSaved());
 
   const sessionId = useRef(newSessionId());
+  // What the *currently open* conversation is doing. Another conversation
+  // still answering in the background is none of this surface's business.
+  const busy = Boolean(pending[sessionId.current]);
+  const trace = traces[sessionId.current] ?? EMPTY_TRACE;
   // Monotonic send id: a "New query" issued while a question is flying
   // invalidates the in-flight response so it can't append to the fresh
   // transcript or wedge `busy` on.
@@ -185,7 +199,15 @@ export default function App() {
   // composer and its option buttons continue the session instead.
   async function send(query: string, opts?: { fresh?: boolean }) {
     const text = query.trim();
-    if (!text || busy) return;
+    // Only a question aimed at a conversation that is *already answering* is
+    // refused, and a fresh send is never that: it rotates to a new session
+    // below, which cannot be pending. Checking the outgoing session here is
+    // what still blocked "ask something new" while the old thread flew.
+    // Two conversations may fly at once -- the backend keys its session store
+    // the same way, and /chat/stream is covered for concurrent turns by
+    // tests/test_stream.py.
+    if (!text) return;
+    if (!opts?.fresh && pending[sessionId.current]) return;
     if (opts?.fresh) {
       // A fresh question orphans the previous server session: forget it
       // so it can't be inherited from, then rotate the id.
@@ -202,18 +224,23 @@ export default function App() {
     setReplayOpen(false);
     setView("thread");
     setMessages((m) => [...m, { role: "user", text }]);
-    setBusy(true);
+    // Captured once. `sessionId.current` can rotate under a long flight (the
+    // user starts something new), and every write below must land on the
+    // conversation that actually asked -- not on whichever one is open when
+    // the answer arrives.
+    const owner = sessionId.current;
+    setPending((p) => ({ ...p, [owner]: true }));
     const mine = ++reqId.current;
-    setTrace([]);
+    setTraces((t) => ({ ...t, [owner]: [] }));
     // A superseded stream keeps running server-side but must not paint
     // into the next question's trace. Gate on the live request id.
     const onEvent = (event: StreamEvent) => {
       if (reqId.current !== mine) return;
-      setTrace((t) => [...t, event]);
+      setTraces((t) => ({ ...t, [owner]: [...(t[owner] ?? []), event] }));
     };
     const payload = {
       query: text,
-      session_id: sessionId.current,
+      session_id: owner,
       include_recommendation: true,
       // The chrome locale IS the answer language. Slice 1 shipped the switch
       // without this line, so a Tamil UI asked for and got English prose.
@@ -260,7 +287,15 @@ export default function App() {
         },
       ]);
     } finally {
-      if (reqId.current === mine) setBusy(false);
+      // Always clear the owner's flag, superseded or not. Gating this on the
+      // live request id is what wedged the composer: a request invalidated
+      // by a session rotation left `pending[owner]` set forever, and
+      // returning to that conversation found it permanently answering.
+      setPending((p) => {
+        const next = { ...p };
+        delete next[owner];
+        return next;
+      });
     }
   }
 
@@ -269,7 +304,6 @@ export default function App() {
     // superseded send() above will no-op on resolve instead of appending
     // to the fresh transcript.
     reqId.current++;
-    setBusy(false);
     const old = sessionId.current;
     sessionId.current = newSessionId();
     void forgetSession(old).catch(() => {});
@@ -486,8 +520,13 @@ export default function App() {
             theme={theme}
             settings={settings}
             feed={feedState}
-            busy={busy}
-            trace={trace}
+            // Never another conversation's state. Sending from the bridge
+            // starts a *fresh* session and switches to the thread in the same
+            // synchronous block, so the bridge can never be the surface that
+            // owns a flight -- and a thread still answering in the background
+            // must not paint its pipeline across the front page.
+            busy={false}
+            trace={EMPTY_TRACE}
             onSend={(text) => void send(text, { fresh: true })}
             onOpenSettings={() => {
               setSheetReturnFocus(str.rail.settings.label);
