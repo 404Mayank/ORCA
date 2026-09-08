@@ -2,7 +2,54 @@
 
 Living status document. Updated as work lands, not as it is planned.
 
-**Last updated:** 2026-09-07 · **Tests:** 386 passing, 15 skipped, 0 failed (venv, weather+alert cache, hermetic) · **Head:** Phase 4 + streams 0-4, 6 + UI reskin + /settings · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
+**Last updated:** 2026-09-08 · **Tests:** 496 passing, 5 skipped, 0 failed (venv, full cache incl. satellite, hermetic) · **Head:** `feat/s13-small-batch`, 11 slices pushed to fork + origin · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
+
+---
+
+## What landed on 2026-09-07/08 — eleven slices on `feat/s13-small-batch`
+
+All on one branch, one slice per commit, pushed to fork and origin.
+Suite: 425 → 496 passing, 11 → 5 skipped (routing unskipped on real
+bathymetry). Every slice plan → critiquer → implement, tests-first
+with stash-A/B proof, `tsc` + ruff-no-new. Workers on glm-5.3-flash,
+then muse-spark-1.3-contributor.
+
+- **S14 thread title** — header anchors to the first exchange, stops
+drifting on follow-ups. Single-question threads unchanged.
+- **Brewing card** — the wait state renders the real stream stages
+(roadmap, agent chips, verbatim assessments, elapsed clock). No
+percentages, no ETA, no pre-guard prose.
+- **Living frame** — conic edge-flow rim with travelling comet bands,
+autonomous wander wash, then a Gemini-style magenta spectrum pass
+(send button, hero wave). Verdict hues untouched.
+- **Data-rows honesty** — readiness enforces 12 h weather / 7 d
+satellite gates, corrupt cache files fail soft, UI rows show minute
+ages and cyclone-only scoping. 12 hermetic tests.
+- **Shelter route legs** — first-class `Recommendation.route` from
+`optimise_route`, structured microdegree waypoint check, drawn
+neutral-blue. Fires on `no_go`/`marginal`; zero-length legs fail
+honestly. 15 tests incl. hallucinated-waypoint rejection.
+- **Wind gust display** — driver tables name the gust that drove the
+verdict (generic across drivers); model options deduped. The
+verdict was right, the display lied; now they agree. 5 tests.
+- **Planner transparency** — per-turn log line, honest fallback badge,
+suggestion dedupe. Fallback rate is now measurable. 7 tests.
+- **Contextual follow-ups** — post-answer suggestions from the
+verified object (new `suggest` LLM role, 6 s abandon, source
+labeled model/rules/static/mixed). 22 tests.
+- **Bathymetry + proof** — real SRTM30_PLUS cache (3799 cells),
+routing tests unskipped; structural finding below.
+- **Tamil Slice 1** — Tamil UI chrome, Noto stack, persisted locale;
+answers honestly stay English until Slice 2. 3 tests.
+- **Data turnaround** — ocean cache filled from a reachable network
+(SST obs 1.4 d, chlorophyll obs 3.3 d). PFZ/causal undegraded for
+the first time. CoastWatch verified unreachable from the old
+network (v4+v6 filtered); the ingest code was exonerated.
+
+**Structural finding:** the shelter line ~never draws for shore
+queries — shelter resolves to the origin gazetteer point, so the leg
+has zero length by design. Lines on the map need origin→zone
+(PFZ-destination) scope, currently deferred. Owner call pending.
 
 ---
 

@@ -3,6 +3,30 @@
 One line each: decision, date, rationale. New entries go on top with a date.
 Reversing one requires updating the code it cites, not just this file.
 
+- **2026-09-08 — Shelter-only routing; zero-length legs fail.** Shelter
+  resolves to the origin gazetteer point for shore queries, so a same-cell
+  leg is FAILED, not a single-point line. Lines on the map need
+  origin→zone scope (deferred, owner call). (`route_optimise.py`)
+- **2026-09-08 — Driver display names the gust.** The verdict thresholds
+  the peak but the table showed the sustained band; now peak-inclusive
+  wording generic across drivers. Relational prose still isn't
+  verifier-checked — tracked gap. (`templates/en`, `AnswerView`)
+- **2026-09-08 — Suggestions generated post-answer, labeled
+  model/rules/static/mixed.** Planner-time guesses restarted the
+  conversation; the suggest step reads the verified object under a 6 s
+  abandon budget. New `suggest` LLM role, 200 tokens. (`agents/suggest.py`)
+- **2026-09-08 — Tamil per-language templates, ASCII digits.** Translating
+  finished sentences would corrupt numbers; `ta/` templates are authored
+  with identical slot keys, parity-tested. Tamil number-words evade the
+  digit guard — closed by a dropped-numbers check. (`language/`)
+- **2026-09-08 — Readiness enforces staleness.** 12 h weather / 7 d
+  satellite gates from `risk_thresholds.yaml`; corrupt cache fails soft;
+  alerts reports operator-table age beside the cyclone check.
+  (`orchestrator/routes/health.py`)
+- **2026-09-08 — Per-turn planner logging.** Fallback rate was
+  unmeasurable from logs; one line per turn now. Deterministic
+  clarification answers no longer wear the failure badge. (`turn.py`)
+
 - **2026-09-07 — `ORCA_TIER` free/fast/paid.** Free-pool queues dominated turn
   latency (108 s measured); paid Go serves the same turn in 12 s. Tier swaps
   order+chains only; roles, guards, fallbacks untouched. (`client.py`)

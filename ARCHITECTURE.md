@@ -85,6 +85,10 @@ The `✓ 15 numbers verified` badge in the UI is the visible end of this chain.
                                           ▼        ▼
                                    refuse to    NARRATE (LLM)
                                    show it      + guard against drift
+                                                      │
+                                                      ▼
+                                           SUGGEST (LLM, post-answer)
+                                           + strip_numbers, 6 s abandon
 ```
 
 Everything lives in one function — `orchestrator/turn.py::run_turn()` — so the
@@ -262,6 +266,7 @@ the sign mattered, and the verifier refused the answer rather than showing it.
 | risk | ✔ | same |
 | hypothesis proposer | ✔ | proposes causal explanations to be **tested by code** |
 | narrator | ✔ | turns a verified object into English |
+| suggest follow-ups | ✔ | proposes follow-up questions from the verified object |
 | synthesis | ✘ | assembles typed fragments; deterministic |
 | verifier | ✘ | checks numbers; deterministic |
 
@@ -412,6 +417,8 @@ explanation and a guess.
 | `degraded` | a tool failed or the data is stale; the answer is partial and says so |
 | suggestion buttons | written by the model per turn. If you see the same four with place names baked in, the offline fallback is running and something is wrong |
 | evidence drawer | every claim, its `kind`, and the `tool_call_id` it came from |
+| route line | shelter polyline from `optimise_route`, drawn only when verified |
+| suggestion label | `model` / `rules` / `static` / `mixed` — who wrote the follow-ups |
 
 `kind` is on every claim and the verifier treats the three differently:
 
@@ -447,7 +454,7 @@ core/schemas/   recommendation, intent, plan, tool_io   ← imports nothing
 core/           provenance (tool_call_id logging), units, env
 ingest/         sources/ static/ transform/ catalogue climatology replay
 tools/          registry + ocean, weather, geo, risk
-agents/         one file per agent + prompts/*.md
+agents/         one file per agent + prompts/*.md (incl. suggest + suggest.md)
 orchestrator/   main (FastAPI), turn, executor, collaborate, session,
                 validate_plan, verifier, llm/
 language/       detect (returns "en"), translate (identity), templates/en

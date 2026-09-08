@@ -5,10 +5,14 @@ Tamil Nadu coast. Read `CLAUDE.md` for the rules and `ARCHITECTURE.md` for
 the design; this file is the **current operational state** — what runs
 where, what is true right now, what is left, and what will bite you.
 
-> **Status as of 2026-09-07 EOD:** master current through PR #13 (merged).
-> Open: #12 (discovery agent, Ritvik06-dev) — **HELD, do not merge**
-> (contradicts the no-discovery-agent architecture; needs owner call).
-> Suite: **423 passed / 11 skipped**. UI + API verified live with screenshots.
+> **Status as of 2026-09-08:** `feat/s13-small-batch`, 11 slices committed
+> and pushed to fork + origin (S14, brewing, gradients, data-rows,
+> route legs, wind display, transparency, follow-ups, bathymetry fix,
+> Tamil Slice 1). Master current through PR #13 (merged); no new PRs
+> opened yet. Open: #12 (discovery agent, Ritvik06-dev) — **HELD,
+> do not merge** (contradicts the no-discovery-agent architecture;
+> needs owner call). Suite: **496 passed / 5 skipped**. UI + API
+> verified live with screenshots after every slice.
 
 ---
 
@@ -101,12 +105,17 @@ Keys: `OPENCODE_API_KEY`, `OPENCODE_GO_API_KEY`, `GROQ_API_KEY`,
 
 ## 7. Data state
 
-- **Cached:** weather (Open-Meteo, ~2–4 h old via nightly refresh),
-  alerts (GDACS, 0 in force), bathymetry, Fengal replay archive (120 h/layer,
-  gitignored under `data/replay/`).
-- **Missing:** SST + chlorophyll — CoastWatch ERDDAP SSL-fails from this
-  network, so PFZ/causal stay degraded. **Retry from better wifi before any
-  demo:** `.venv/bin/python scripts/refresh_cache.py --ocean`.
+- **Cached:** weather (Open-Meteo, 72 h, 17 points), SST (MUR L4,
+  obs ~1.4 d), chlorophyll (VIIRS DINEOF, obs ~3.3 d), alerts
+  (GDACS, 0 in force), bathymetry (SRTM30_PLUS, 3799 sea cells),
+  Fengal replay archive (120 h/layer). PFZ/causal fully fed.
+- **Still needs a human:** `config/active_alerts.yaml` review is
+  stale past its 24 h rule — live safety answers `go`, degraded,
+  until someone reads the bulletin. Cyclone half is live; wave half
+  is the operator table.
+- CoastWatch is filtered from some networks (v4+v6 drop) and fine
+  from others — if SST/chlorophyll read `missing` again, change
+  networks and re-run `--ocean` before debugging code.
 - Live demo proves little (September sea is calm → `go`); the Fengal replay
   (`POST /replay/fengal`, `no_go` 71.5 h pre-landfall) is the demo opener.
 
@@ -140,10 +149,13 @@ Keys: `OPENCODE_API_KEY`, `OPENCODE_GO_API_KEY`, `GROQ_API_KEY`,
 
 ## 10. What's left (grouped, honest sizes)
 
-- **Small:** settings reset-all button (API ready), `vis_km` replay column,
-  focus restore on sheet close, thread-title drift, `by_claim` visual check.
-- **Medium:** route legs on map (needs synthesis waypoint claims +
-  verifier attention), replay UI polish, Tamil adapter + strings swap.
+- **Small:** DONE — reset-all, `vis_km`, focus restore, title drift,
+  `by_claim` check (all verified, pushed).
+- **Medium:** Tamil Slices 2–3 (plan approved, Slice 1 pushed -
+  deterministic `ta` rendering, then narration + detection);
+  replay UI polish; PFZ-destination route legs (**owner call:**
+  shelter line fires ~never for shore queries by design — expand
+  scope to origin→zone legs, or accept and move on).
 - **Structural:** MPA/EEZ geometry, INCOIS high-wave feed (operator table
   stands in), scheduled ingest, Gaja replay dataset.
 - **Explicitly declined** (reasons on file): per-model pickers, threshold
@@ -152,7 +164,9 @@ Keys: `OPENCODE_API_KEY`, `OPENCODE_GO_API_KEY`, `GROQ_API_KEY`,
 ## 11. Git workflow
 
 Branches `feat/s*` on fork `404Mayank/ORCA`, PRs to `mannangrover/ORCA`
-master (stacked; #3–#11 and #13 merged). Commit only with 423-green suite +
-`tsc` + build + ruff-no-new-violations. Standing orders from the owner:
-glm-5.3-flash critiquer reviews every feature after it lands; subagents get
-tight file allowlists (one writer per file set).
+master (stacked; #3–#11 and #13 merged). `feat/s13-small-batch` (11
+slices) is pushed to fork AND origin; PRs not yet opened. Commit only
+with suite-green + `tsc` + ruff-no-new-violations (new counts compared
+per file vs HEAD, not repo totals). Standing orders from the owner:
+critiquer reviews every feature after it lands (spark for workers);
+subagents get tight file allowlists (one writer per file set).
