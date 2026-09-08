@@ -247,10 +247,25 @@ successful refresh, `/readiness` still reported the seed cache's age. A
 rate-limited `cache.reload()` in middleware fixes it (15 min, well inside
 the 12 h staleness gate). Verified: `age_hours` went 8.13 -> 0.03.
 
-**CORS** is `ORCA_ALLOWED_ORIGINS`, comma-separated, on the `orca-llm`
-secret. Empty means no CORS headers -- correct for curl, and it stops a page
-on another domain spending this deployment's tokens. Add the Vercel URL
-there when the frontend lands.
+**Auth.** Every path except `/health` and `/readiness` requires
+`x-orca-key`, matched against `ORCA_API_KEY` on the `orca-llm` secret. The
+URL is in a public repo and every `/chat` walks the paid chain, so without a
+gate anyone reading the repository can run up the bill. The deployment fails
+**closed** if the key is unset -- 503 with an actionable message -- because an
+auth control that silently does nothing when misconfigured is worse than
+none. Verified after deploying: `/health` and `/readiness` 200 without a key;
+`/chat`, `/chat/stream` and `/replay` 401 without one and 401 with a wrong
+one; a correct key answers normally.
+
+The frontend sends the key from `VITE_ORCA_API_KEY`, so it is in the client
+bundle and readable in devtools. That is understood and accepted: the threat
+this stops is drive-by and scraped traffic, which is what actually arrives.
+A determined reader wants Modal proxy auth instead.
+
+**CORS** is `ORCA_ALLOWED_ORIGINS`, comma-separated, on the same secret.
+Empty means no CORS headers -- correct for curl, and it is not a substitute
+for the gate above: CORS restrains browsers, and the traffic worth worrying
+about is curl.
 
 Measured on the deployment, 2026-09-08: safety question 9.7 s end to end
 (verified, 33 numbers checked), a plain conditions reading 4.3 s down the

@@ -1,9 +1,38 @@
 import type { ChatRequest, ChatResponse } from "../types";
 
 /**
- * The API client. Paths are same-origin and proxied to uvicorn in dev
- * (see vite.config.ts), so no base URL is baked into the build.
+ * The API client.
+ *
+ * In dev, paths stay same-origin and vite proxies them to uvicorn (see
+ * vite.config.ts). In a deployed build the API lives on Modal and the
+ * frontend on Vercel, so both a base URL and a shared-secret header come
+ * from the build environment.
+ *
+ * On the key: it ships in the client bundle and anyone who opens devtools
+ * can read it. That is understood. The endpoint spends real money on every
+ * question and its URL is in a public repository, so the gate exists to stop
+ * drive-by and scraped traffic, which is the traffic that actually shows up.
+ * A determined reader is a different threat and wants Modal's proxy auth.
  */
+
+/** Absolute API origin in a deployed build; empty in dev, where vite proxies. */
+const BASE = (import.meta.env.VITE_ORCA_API_URL ?? "").replace(/\/$/, "");
+
+const API_KEY = import.meta.env.VITE_ORCA_API_KEY ?? "";
+
+/**
+ * One place that knows about the base URL and the key.
+ *
+ * Every call goes through it rather than each `fetch` growing its own copy:
+ * seven call sites each remembering to add a header is seven chances for one
+ * of them to forget, and the one that forgets fails as a 401 in production
+ * only.
+ */
+function api(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (API_KEY) headers.set("x-orca-key", API_KEY);
+  return fetch(`${BASE}${path}`, { ...init, headers });
+}
 
 export interface ReadinessLayer {
   cached: boolean;
@@ -50,7 +79,7 @@ export async function ask(request: ChatRequest): Promise<ChatResponse> {
   const budget = setTimeout(() => abort.abort(), ASK_BUDGET_MS);
   let response: Response;
   try {
-    response = await fetch("/chat", {
+    response = await api("/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -68,7 +97,7 @@ export async function ask(request: ChatRequest): Promise<ChatResponse> {
 }
 
 export async function readiness(): Promise<Readiness> {
-  const response = await fetch("/readiness");
+  const response = await api("/readiness");
   if (!response.ok) throw new Error(`readiness ${response.status}`);
   return response.json();
 }
@@ -89,7 +118,7 @@ let boundariesCache: Promise<Boundaries> | null = null;
 /** Static treaty geometry, fetched once. Same line the geofence tool tests. */
 export function getBoundaries(): Promise<Boundaries> {
   if (!boundariesCache) {
-    boundariesCache = fetch("/geo/boundaries").then((response) => {
+    boundariesCache = api("/geo/boundaries").then((response) => {
       if (!response.ok) {
         boundariesCache = null;
         throw new Error(`boundaries ${response.status}`);
@@ -114,13 +143,13 @@ export interface TierSettings {
 
 /** Live tier state. The POST takes effect on the next question, no restart. */
 export async function getSettings(): Promise<TierSettings> {
-  const response = await fetch("/settings");
+  const response = await api("/settings");
   if (!response.ok) throw new Error(`settings ${response.status}`);
   return response.json();
 }
 
 async function postSettings(patch: Record<string, unknown>): Promise<TierSettings> {
-  const response = await fetch("/settings", {
+  const response = await api("/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
@@ -201,7 +230,7 @@ export async function askStream(
   let response: Response;
   try {
     armStall();
-    response = await fetch("/chat/stream", {
+    response = await api("/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "text/event-stream" },
       body: JSON.stringify(request),
@@ -286,7 +315,7 @@ export interface ReplayTrajectory {
 
 /** Archived storm ids with a usable on-disk cache. [] when none. */
 export async function fetchReplayList(): Promise<string[]> {
-  const response = await fetch("/replay");
+  const response = await api("/replay");
   if (!response.ok) throw new Error(`replay ${response.status}`);
   const body: unknown = await response.json();
   if (!Array.isArray(body) || !body.every((e) => typeof e === "string")) {
@@ -297,7 +326,7 @@ export async function fetchReplayList(): Promise<string[]> {
 
 /** Run one archived storm end to end. Throws with the server's detail. */
 export async function runReplay(eventId: string): Promise<ReplayTrajectory> {
-  const response = await fetch(`/replay/${encodeURIComponent(eventId)}?step_hours=6`, {
+  const response = await api(`/replay/${encodeURIComponent(eventId)}?step_hours=6`, {
     method: "POST",
   });
   const body: unknown = await response.json().catch(() => null);
@@ -330,14 +359,14 @@ export interface SessionTurn {
 
 /** Real conversation history for this session, from the server. */
 export async function forgetSession(sessionId: string): Promise<void> {
-  const response = await fetch(`/session/${encodeURIComponent(sessionId)}`, {
+  const response = await api(`/session/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
   });
   if (!response.ok) throw new Error(`session ${response.status}`);
 }
 
 export async function sessionHistory(sessionId: string): Promise<SessionTurn[]> {
-  const response = await fetch(`/session/${encodeURIComponent(sessionId)}`);
+  const response = await api(`/session/${encodeURIComponent(sessionId)}`);
   if (!response.ok) throw new Error(`session ${response.status}`);
   const body = await response.json();
   return Array.isArray(body.turns) ? body.turns : [];

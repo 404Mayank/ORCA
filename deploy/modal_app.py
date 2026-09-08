@@ -52,6 +52,10 @@ from pathlib import Path
 import modal
 
 APP_NAME = "orca"
+
+#: The shared-secret header. Lowercase because HTTP header names are
+#: case-insensitive and Starlette normalises them on the way in.
+AUTH_HEADER = "x-orca-key"
 REPO = Path(__file__).resolve().parent.parent
 
 #: Where the app expects its cache. The ingest modules resolve it relative to
@@ -142,10 +146,12 @@ def api():
     """The same FastAPI app the CLI and the laptop run. No fork, no variant."""
     _seed_cache_if_empty()
 
+    import hmac
     import time
 
     from fastapi import Request
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
 
     from orchestrator.main import app as orca
 
@@ -174,6 +180,59 @@ def api():
                 print(f"volume reload failed, serving the previous view: {exc}")
         return await call_next(request)
 
+    # ---------------------------------------------------------------
+    # Shared-secret gate
+    # ---------------------------------------------------------------
+    # This endpoint spends real money. Every /chat call walks the paid Spark
+    # chain, and the URL is in a public repo, so without this anyone reading
+    # the repository can run up the bill.
+    #
+    # CORS is not a substitute and never was: it restrains browsers, and the
+    # traffic worth worrying about is curl.
+    #
+    # Honest about what this is and is not. The frontend has to send the key,
+    # so it ships in the client bundle and anyone who opens devtools can read
+    # it. That is understood and accepted -- the threat being defended
+    # against is drive-by traffic and scraped URLs, not a determined reader.
+    # Modal's own proxy auth is the answer if that changes.
+    api_key = os.environ.get("ORCA_API_KEY", "").strip()
+
+    # Liveness only. These cost nothing to serve and are how anyone checks
+    # the deployment is up, including Modal itself.
+    OPEN_PATHS = {"/health", "/readiness"}
+
+    @orca.middleware("http")
+    async def require_key(request: Request, call_next):
+        if request.method == "OPTIONS" or request.url.path in OPEN_PATHS:
+            return await call_next(request)
+        if not api_key:
+            # Fail CLOSED. An auth control that quietly does nothing when
+            # misconfigured is worse than none, because it is believed in.
+            # The message is deliberately actionable: this is an operator
+            # error, and it should take one reading to fix rather than a
+            # debugging session.
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "ORCA_API_KEY is not set on this deployment, so the "
+                        "shared-secret gate cannot be enforced and requests "
+                        "are refused rather than served unprotected. Set it "
+                        "on the orca-llm secret and redeploy."
+                    )
+                },
+            )
+        # compare_digest rather than ==. The timing signal here is not a
+        # realistic attack, but constant-time comparison of a secret costs
+        # one import and is the habit worth having.
+        offered = request.headers.get(AUTH_HEADER, "")
+        if not hmac.compare_digest(offered, api_key):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": f"missing or invalid {AUTH_HEADER}"},
+            )
+        return await call_next(request)
+
     # The frontend is deployed separately (Vercel), so it is cross-origin.
     # Read from the environment rather than hardcoded: a preview deployment
     # gets its own URL, and a wildcard here would let any page on the
@@ -186,7 +245,7 @@ def api():
             CORSMiddleware,
             allow_origins=origins,
             allow_methods=["GET", "POST", "DELETE"],
-            allow_headers=["Content-Type"],
+            allow_headers=["Content-Type", AUTH_HEADER],
         )
     return orca
 
