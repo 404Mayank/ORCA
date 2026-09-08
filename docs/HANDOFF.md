@@ -5,13 +5,13 @@ Tamil Nadu coast. Read `CLAUDE.md` for the rules and `ARCHITECTURE.md` for
 the design; this file is the **current operational state** — what runs
 where, what is true right now, what is left, and what will bite you.
 
-> **Status as of 2026-09-08:** `feat/s13-small-batch`, 11 slices committed
-> and pushed to fork + origin (S14, brewing, gradients, data-rows,
-> route legs, wind display, transparency, follow-ups, bathymetry fix,
-> Tamil Slice 1). Master current through PR #13 (merged); no new PRs
+> **Status as of 2026-09-08:** `feat/s13-small-batch`, 13 slices committed
+> (S14, brewing, gradients, data-rows, route legs, wind display,
+> transparency, follow-ups, bathymetry fix, Tamil Slices 1–2, tier
+> default). Master current through PR #13 (merged); no new PRs
 > opened yet. Open: #12 (discovery agent, Ritvik06-dev) — **HELD,
 > do not merge** (contradicts the no-discovery-agent architecture;
-> needs owner call). Suite: **496 passed / 5 skipped**. UI + API
+> needs owner call). Suite: **514 passed / 5 skipped**. UI + API
 > verified live with screenshots after every slice.
 
 ---
@@ -33,8 +33,12 @@ hypotheses are dropped not reported, unsure-means-it-belongs-in-code.
 - **Five queries:** `pfz_locate`, `safety_assess`, `geofence_check`,
   `causal_explain`, `conditions_report` (read-only; safety phrasing re-routes
   to `safety_assess` in code).
-- **English only.** Tamil later = second object in
-  `frontend/src/i18n/strings.ts` + backend adapter stub (both already shaped).
+- **English and Tamil.** Chrome from the second object in
+  `frontend/src/i18n/strings.ts`; answer prose from
+  `language/templates/<tag>`. The UI locale is sent as `language` on every
+  `/chat`, and a tag with no templates directory falls back to English with
+  a note in `notes`. Tamil answers are template-rendered, never LLM-narrated
+  (see §12).
 - No new agents, sources, or query types. No discovery agent — catalogue
   lookup is deterministic (`resolve_datasets()` in tools).
 
@@ -151,11 +155,17 @@ Keys: `OPENCODE_API_KEY`, `OPENCODE_GO_API_KEY`, `GROQ_API_KEY`,
 
 - **Small:** DONE — reset-all, `vis_km`, focus restore, title drift,
   `by_claim` check (all verified, pushed).
-- **Medium:** Tamil Slices 2–3 (plan approved, Slice 1 pushed -
-  deterministic `ta` rendering, then narration + detection);
+- **Medium:** Tamil Slice 3 (Slices 1–2 pushed — fluent Tamil narration
+  behind a Tamil prompt plus a dropped-numbers guard, then input
+  detection); a Tamil catalogue for the technical footer
+  (`confidence.basis`, caveats) and for the agent `notes` the UI shows;
   replay UI polish; PFZ-destination route legs (**owner call:**
   shelter line fires ~never for shore queries by design — expand
   scope to origin→zone legs, or accept and move on).
+- **Needs a native reader before the demo:** the Tamil strings in
+  `language/templates/ta/__init__.py` and the `ta` object in
+  `strings.ts` are model-authored. The tests prove the *numbers* and the
+  *slots* are right; nothing proves the Tamil reads well to a fisherman.
 - **Structural:** MPA/EEZ geometry, INCOIS high-wave feed (operator table
   stands in), scheduled ingest, Gaja replay dataset.
 - **Explicitly declined** (reasons on file): per-model pickers, threshold
@@ -170,3 +180,31 @@ with suite-green + `tsc` + ruff-no-new-violations (new counts compared
 per file vs HEAD, not repo totals). Standing orders from the owner:
 critiquer reviews every feature after it lands (spark for workers);
 subagents get tight file allowlists (one writer per file set).
+
+## 12. Answer languages
+
+`language/` is the adapter; `language/templates/<tag>/` is one renderer per
+language. `SUPPORTED` in `detect.py` lists the tags that have one, and
+`orchestrator/turn.py` allowlists against it — an unlisted tag answers in
+English and records `language 'xx' not supported yet` in `notes`. Detection
+of the *question's* language is still the honest stub: Tamil is answered
+when the UI asks for it, never when the system guesses.
+
+**Tamil is deterministic.** `narrate()` skips the LLM for any non-English
+target and returns the template rendering. This is not a stopgap for
+missing fluency, it is the number guard: `number_guard` matches literal
+digit tokens, and a model writing "2.5" as இரண்டரை leaves it nothing to
+compare, so a rewritten figure would pass. Digits therefore stay ASCII in
+Tamil output, and `tests/test_tamil_render.py` fails if a Tamil numeral
+(௦-௯) ever reaches the answer.
+
+**The catalogue is keyed by the English pattern**, so it can drift. Two
+tests stop it: one parses `agents/synthesis_agent.py` and fails when an
+authored template has no Tamil entry *or* a Tamil entry has no authored
+template; one asserts identical `{slot}` sets on every pair. Reword an
+English sentence in synthesis and the suite tells you which Tamil line to
+follow it with. Do not delete those tests to make a reword land faster.
+
+Still English by design, and declared in-answer by a Tamil note:
+model-authored hypothesis statements, `confidence.basis`, caveats, and the
+per-agent deliberation `notes`.

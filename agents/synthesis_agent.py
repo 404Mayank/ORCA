@@ -1158,7 +1158,11 @@ def _build_conditions(result: ExecutionResult, intent: Intent, turn_id: str) -> 
         turn_id=turn_id,
         generated_at=datetime.now(IST),
         # No verdict. See the note at the top of this builder.
-        headline=Templated(template=f"Conditions near {place_name}.", slots={"place": place_name}),
+        # The place travels as a slot, never baked into the template. An
+        # interpolated template is a finished sentence by another name: it
+        # cannot be looked up in a per-language catalogue, so a Tamil answer
+        # would silently keep the English headline.
+        headline=Templated(template="Conditions near {place}.", slots={"place": place_name}),
         claims=claims,
         negative_findings=_negative_findings(result),
         spatial_context=_spatial_from_place(result, intent),

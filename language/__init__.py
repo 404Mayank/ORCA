@@ -9,11 +9,24 @@ __all__ = ["detect_language", "translate", "translate_template", "SUPPORTED", "r
 
 
 def render(rec, language: str = "en") -> str:
-    """Render a recommendation in the target language."""
-    if language != "en":
-        raise NotImplementedError(
-            f"No templates for {language!r}. Phase one is English only."
-        )
-    from language.templates.en import render as render_en
+    """Render a recommendation in the target language.
 
-    return render_en(rec)
+    Dispatch only. Each ``templates/<lang>`` module owns its own prose and
+    its own catalogue; adding a language is a directory and one line here,
+    which is the property CLAUDE.md asked the stub to preserve.
+
+    An unknown tag still raises. Returning English under a Tamil flag would
+    be the one failure mode this adapter exists to prevent -- the caller
+    (``orchestrator.turn``) decides to fall back, and records that it did.
+    """
+    if language == "en":
+        from language.templates.en import render as render_en
+
+        return render_en(rec)
+    if language == "ta":
+        from language.templates.ta import render as render_ta
+
+        return render_ta(rec)
+    raise NotImplementedError(
+        f"No templates for {language!r}. Supported: {', '.join(SUPPORTED)}."
+    )

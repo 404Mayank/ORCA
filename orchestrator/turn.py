@@ -32,6 +32,7 @@ from agents.suggest import SUGGEST_BUDGET_S, suggest_followups
 from agents.synthesis_agent import build_recommendation
 from core.schemas.intent import Intent
 from core.schemas.recommendation import Recommendation
+from language import SUPPORTED
 from orchestrator.collaborate import run_with_collaboration
 from orchestrator.progress import ProgressBus
 from orchestrator.session import SESSIONS, Turn
@@ -427,12 +428,12 @@ def run_turn(
     # the user's wait. Both read the same already-verified object, so
     # there is no ordering dependency between them.
     prior_options = SESSIONS.prior_answer_options(session_id)
-    # Slice 1 Tamil is chrome-only (menus, font, switch); answer templates
-    # exist in English alone. An unsupported tag falls back WITH a recorded
-    # note -- silent fallback would read as a Tamil answer that never came,
-    # and no fallback at all raises NotImplementedError out of narrate via
-    # language.render. This pin is load-bearing until templates/ta lands.
-    effective_language = language if language in ("en",) else "en"
+    # The allowlist is the adapter's own SUPPORTED tuple, not a copy of it:
+    # a language with a templates/ directory can be answered, and one without
+    # falls back WITH a recorded note. Silent fallback would read as a Tamil
+    # answer that never came, and no fallback at all raises
+    # NotImplementedError out of narrate via language.render.
+    effective_language = language if language in SUPPORTED else "en"
     if effective_language != language:
         notes.append(f"language {language!r} not supported yet; answered in English")
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)

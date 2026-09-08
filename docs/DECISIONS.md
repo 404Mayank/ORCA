@@ -24,10 +24,21 @@ Reversing one requires updating the code it cites, not just this file.
   model/rules/static/mixed.** Planner-time guesses restarted the
   conversation; the suggest step reads the verified object under a 6 s
   abandon budget. New `suggest` LLM role, 200 tokens. (`agents/suggest.py`)
-- **2026-09-08 — Tamil per-language templates, ASCII digits.** Translating
-  finished sentences would corrupt numbers; `ta/` templates are authored
-  with identical slot keys, parity-tested. Tamil number-words evade the
-  digit guard — closed by a dropped-numbers check. (`language/`)
+- **2026-09-08 — Tamil renders from templates; the narrator sits it out
+  (Slice 2).** Translating finished sentences would corrupt numbers, so
+  `templates/ta` is a hand-authored catalogue keyed by the English pattern,
+  with identical slot keys and ASCII digits. Two tests hold it in place: one
+  walks `synthesis_agent.py`'s AST so a reworded English sentence fails the
+  build, one asserts the Tamil paragraph carries the same numeric tokens as
+  the English one, multiplicities included.
+  `narrate()` returns the deterministic rendering unchanged for any
+  non-English target rather than letting the LLM rewrite it: Tamil
+  number-words carry no digits, so `number_guard` would see nothing to match
+  and pass a paragraph whose figures had become words. Fluent Tamil
+  narration needs a Tamil prompt *and* a dropped-numbers check — Slice 3.
+  Model-authored hypothesis statements, `confidence.basis` and caveats stay
+  English and the answer says so in Tamil.
+  (`language/`, `agents/narrate.py`)
 - **2026-09-08 — Readiness enforces staleness.** 12 h weather / 7 d
   satellite gates from `risk_thresholds.yaml`; corrupt cache fails soft;
   alerts reports operator-table age beside the cyclone check.

@@ -12,10 +12,12 @@ from __future__ import annotations
 
 __all__ = ["SUPPORTED", "detect_language"]
 
-#: Phase one. Adding "ta" here is most of the work of supporting Tamil; the
-#: rest is a templates/ta directory, because claims are stored as slot
-#: templates rather than as finished sentences.
-SUPPORTED = ("en",)
+#: Languages the system can RENDER an answer in -- each one has a
+#: ``language/templates/<tag>`` directory. This is deliberately not the same
+#: question as which language a *question* arrives in: detection is still the
+#: stub below, so Tamil is answered when the UI asks for it, not when the
+#: system guesses at it.
+SUPPORTED = ("en", "ta")
 
 
 def detect_language(text: str) -> str:

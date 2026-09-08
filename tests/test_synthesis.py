@@ -220,9 +220,14 @@ def test_language_detection_is_an_honest_stub():
 
 
 def test_translation_refuses_an_unsupported_language():
-    """Better a clear failure than silently returning English as Tamil."""
+    """Better a clear failure than silently returning English as Tamil.
+
+    Tamil has a catalogue now (Slice 2), so the unsupported case is tested
+    with a tag that has no ``templates/`` directory. The property under test
+    never changed: an unknown language is a refusal, not a quiet passthrough.
+    """
     with pytest.raises(NotImplementedError, match="not supported"):
-        translate_template("Waves {min}-{max} m", target="ta")
+        translate_template("Waves {min}-{max} m", target="xx")
 
 
 def test_translation_preserves_slot_placeholders():
@@ -233,9 +238,10 @@ def test_translation_preserves_slot_placeholders():
 
 
 def test_rendering_an_unsupported_language_fails_loudly(pipeline):
+    """See tests/test_tamil_render.py for the Tamil side of this contract."""
     _, rec = pipeline
     with pytest.raises(NotImplementedError):
-        render(rec, language="ta")
+        render(rec, language="xx")
 
 
 def test_headline_reflects_the_verdict(pipeline):

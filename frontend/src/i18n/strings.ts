@@ -312,7 +312,7 @@ const en = {
       languageHeading: "Language",
       english: "English",
       tamil: "Tamil",
-      tamilNote: "Menus in Tamil. Answers stay in English for now.",
+      tamilNote: "Menus and answers in Tamil. The technical footer stays English.",
       dataHeading: "Data status",
       dataSub: "What the cache holds, and how old it is. Filled by scripts/refresh_cache.py, never during a question.",
       cached: "cached",
@@ -393,7 +393,8 @@ export type Strings = typeof en;
  * Tamil UI chrome (Slice 1). Compile-time parity is structural: `ta` must
  * satisfy `Strings`, so a missing key is a build error, not a blank
  * button. Two deliberate Slice 1 limits:
- * - Answer prose is NOT here (it comes from the API, English-only) -- the
+ * - Answer prose is NOT here (it comes from the API, in the requested
+ *   language) -- the
  *   settings note below says so on the same screen as the switch.
  * - Example prompts keep ASCII place/vessel tokens (Nagapattinam, FRP
  *   boat, trawler): Tamil place-name resolution is out of scope, and a
@@ -690,7 +691,7 @@ export const ta: Strings = {
       english: "English",
       tamil: "\u0ba4\u0bae\u0bbf\u0bb4\u0bcd",
       tamilNote:
-        "\u0baa\u0b9f\u0bcd\u0b9f\u0bbf\u0b95\u0bb3\u0bcd \u0ba4\u0bae\u0bbf\u0bb4\u0bbf\u0bb2\u0bcd. \u0baa\u0ba4\u0bbf\u0bb2\u0bcd\u0b95\u0bb3\u0bcd \u0b87\u0baa\u0bcd\u0baa\u0bcb\u0ba4\u0bc8\u0b95\u0bcd\u0b95\u0bc1 \u0b86\u0b99\u0bcd\u0b95\u0bbf\u0bb2\u0ba4\u0bcd\u0ba4\u0bbf\u0bb2\u0bcd \u0ba4\u0bca\u0b9f\u0bb0\u0bc1\u0bae\u0bcd.",
+        "\u0baa\u0b9f\u0bcd\u0b9f\u0bbf\u0b95\u0bb3\u0bc1\u0bae\u0bcd \u0baa\u0ba4\u0bbf\u0bb2\u0bcd\u0b95\u0bb3\u0bc1\u0bae\u0bcd \u0ba4\u0bae\u0bbf\u0bb4\u0bbf\u0bb2\u0bcd. \u0ba4\u0bca\u0bb4\u0bbf\u0bb2\u0bcd\u0ba8\u0bc1\u0b9f\u0bcd\u0baa\u0b95\u0bcd \u0b95\u0bc1\u0bb1\u0bbf\u0baa\u0bcd\u0baa\u0bc1\u0b95\u0bb3\u0bcd \u0b86\u0b99\u0bcd\u0b95\u0bbf\u0bb2\u0ba4\u0bcd\u0ba4\u0bbf\u0bb2\u0bcd \u0b87\u0bb0\u0bc1\u0b95\u0bcd\u0b95\u0bc1\u0bae\u0bcd.",
       dataHeading: "\u0ba4\u0bb0\u0bb5\u0bc1 \u0ba8\u0bbf\u0bb2\u0bc8",
       dataSub: "\u0b9a\u0bc7\u0bae\u0bbf\u0baa\u0bcd\u0baa\u0bbf\u0bb2\u0bcd \u0b8e\u0ba9\u0bcd\u0ba9 \u0b89\u0bb3\u0bcd\u0bb3\u0ba4\u0bc1, \u0b8e\u0bb5\u0bcd\u0bb5\u0bb3\u0bb5\u0bc1 \u0baa\u0bb4\u0bc8\u0baf\u0ba4\u0bc1. scripts/refresh_cache.py \u0ba8\u0bbf\u0bb0\u0baa\u0bcd\u0baa\u0bc1\u0bae\u0bcd, \u0b95\u0bc7\u0bb3\u0bcd\u0bb5\u0bbf\u0baf\u0bbf\u0ba9\u0bcd\u0baa\u0bcb\u0ba4\u0bc1 \u0b85\u0bb2\u0bcd\u0bb2.",
       cached: "\u0b9a\u0bc7\u0bae\u0bbf\u0baa\u0bcd\u0baa\u0bbf\u0bb2\u0bcd",

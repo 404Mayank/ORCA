@@ -29,8 +29,14 @@ Everything is regridded onto this at ingest time.
    no verdict, no vessel gate. Any safety phrasing (safe/safest/venture/go
    out) routes to `safety_assess` in code, never here.
 
-**Language:** English only in phase one. The language adapter exists as a
-pass-through stub so Tamil is a one-adapter change later. Do not delete it.
+**Language:** English and Tamil. `language/templates/<tag>/` is one renderer
+per language, keyed by the English template pattern with identical slots and
+ASCII digits; `language/detect.py::SUPPORTED` is the list, and a tag without a
+renderer falls back to English with a recorded note. Do not delete the adapter,
+and do not let an LLM narrate a non-English answer -- the number guard matches
+digit tokens, and number-words evade it. Input-language *detection* is still an
+honest stub: a language is answered when it is asked for, never when it is
+guessed.
 
 ## THE GOVERNING RULE
 

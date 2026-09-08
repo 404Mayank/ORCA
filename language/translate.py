@@ -20,16 +20,26 @@ __all__ = ["translate_template", "translate"]
 def translate_template(template: str, target: str = "en") -> str:
     """Translate a TEMPLATE, with its {slots} left untouched.
 
-    Identity in phase one. When Tamil is added, the slot placeholders must
-    survive the round trip exactly -- a translator that renames {min} to
-    {\u0b95\u0bc1\u0bb1\u0bc8\u0ba8\u0bcd\u0ba4} breaks every claim silently.
+    Identity for English. For Tamil this is a lookup in a hand-authored
+    catalogue, never a model call -- the slot placeholders must survive the
+    round trip exactly, and a translator that renames {min} to
+    {\u0b95\u0bc1\u0bb1\u0bc8\u0ba8\u0bcd\u0ba4} breaks every claim silently. The catalogue
+    entries are pinned slot-for-slot by ``tests/test_tamil_render.py``.
+
+    A template the catalogue does not carry comes back in English. The
+    renderer is the layer that notices and says so; raising here would turn
+    a reworded sentence in synthesis into a failed answer.
     """
-    if target not in ("en",):
-        raise NotImplementedError(
-            f"Language {target!r} is not supported yet. Add a templates/{target} "
-            "directory and a real adapter; do not translate rendered text."
-        )
-    return template
+    if target == "en":
+        return template
+    if target == "ta":
+        from language.templates.ta import TEMPLATES
+
+        return TEMPLATES.get(template, template)
+    raise NotImplementedError(
+        f"Language {target!r} is not supported yet. Add a templates/{target} "
+        "directory and a real adapter; do not translate rendered text."
+    )
 
 
 def translate(text: str, target: str = "en") -> str:

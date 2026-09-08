@@ -215,6 +215,10 @@ export default function App() {
       query: text,
       session_id: sessionId.current,
       include_recommendation: true,
+      // The chrome locale IS the answer language. Slice 1 shipped the switch
+      // without this line, so a Tamil UI asked for and got English prose.
+      // An unrenderable tag falls back server-side with a recorded note.
+      language: locale,
     };
     try {
       // Live trace first; any transport trouble falls back to the

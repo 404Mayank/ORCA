@@ -2,7 +2,49 @@
 
 Living status document. Updated as work lands, not as it is planned.
 
-**Last updated:** 2026-09-08 · **Tests:** 496 passing, 5 skipped, 0 failed (venv, full cache incl. satellite, hermetic) · **Head:** `feat/s13-small-batch`, 11 slices pushed to fork + origin · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq
+**Last updated:** 2026-09-08 · **Tests:** 514 passing, 5 skipped, 0 failed (venv, full cache incl. satellite, hermetic) · **Head:** `feat/s13-small-batch`, 13 slices · **Tools:** 14/14 · **LLM:** opencode Zen first, then Groq · **Languages:** English + Tamil
+
+---
+
+## What landed on 2026-09-08 — Tamil Slice 2: the answer speaks Tamil
+
+The `ta` switch shipped in Slice 1 changed the menus and nothing else --
+the UI never even sent `language` on the request. It does now, and a Tamil
+request comes back as a Tamil answer, rendered deterministically.
+
+- **`language/templates/ta/`** mirrors `en/` block for block: verdict line,
+  driver sentences (ceiling vs floor phrasing preserved -- visibility is
+  still described as *above its minimum*, not over a limit), trajectory,
+  window, hypotheses, negative findings, guidance, alternatives, footer.
+  39 catalogue entries keyed by the English pattern.
+- **No LLM touches a Tamil answer.** `narrate()` returns the template
+  rendering for any non-English target. `number_guard` matches literal
+  digit tokens, so a model spelling 2.5 as இரண்டரை leaves it nothing to
+  compare and a rewritten figure would sail through. Fluent Tamil needs a
+  Tamil prompt *and* a dropped-numbers check: Slice 3.
+- **Digits stay ASCII**, tested. Tamil numerals would blind the narration
+  guard and the verifier's walk over the tool call log alike.
+- **Drift is a build failure.** One test parses `synthesis_agent.py`'s AST
+  and fails when an authored template has no Tamil entry, or a Tamil entry
+  no longer matches any authored English string. Both directions --
+  an orphan entry reads as coverage. Mutation-proved in both directions
+  before committing.
+- **Number parity** asserted as a multiset, on the ideal fixture, the
+  refusal fixture, and a live pipeline answer: same tokens, same counts.
+  The ideal answer prints the turn-back time twice on purpose.
+- **Half-Tamil says so.** `confidence.basis`, caveats, model-authored
+  hypothesis statements and the agent `notes` are still English; the
+  renderer notices and appends a Tamil note rather than passing the
+  paragraph off as fully translated.
+- One contract fix underneath it: the conditions headline was
+  `f"Conditions near {place}."` -- an interpolated template is a finished
+  sentence by another name and can never be looked up in a catalogue.
+- Verified live on the restarted API in all three modes: `ta` Tamil, `en`
+  unchanged (still LLM-narrated), `xx` English with the recorded note.
+
+**Not proven:** the Tamil is model-authored. The tests prove the numbers
+and the slots; nothing yet proves it reads well to a fisherman. A native
+reader before the demo is on the handoff list.
 
 ---
 
@@ -816,7 +858,8 @@ Twelve files remain 0 bytes. None is an oversight:
 
 ## Next up
 
-1. Tamil / regional languages — the remaining explicit ask in the problem
-   statement
+1. Tamil Slice 3 — fluent narration behind a Tamil prompt and a
+   dropped-numbers guard, then input-language detection. Slices 1–2
+   (chrome, then deterministic answers) are in.
 3. MPA / EEZ geometry — "clear" is still qualified to the IMBL alone
 4. Gaja replay — `fetch_archive()` written and unused

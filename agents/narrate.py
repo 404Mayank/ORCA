@@ -101,6 +101,20 @@ def narrate(rec: Recommendation, language: str = "en") -> Narration:
     if not template_fallback_enabled():
         raise RuntimeError("allow_template_fallback is off; narrate() requires it.")
 
+    # Non-English answers are the deterministic rendering, full stop. The
+    # narrator prompt is English, and so are the verdict markers below, so an
+    # LLM handed Tamil either answers in English (wrong language) or rewrites
+    # Tamil prose whose numbers `number_guard` can no longer police: Tamil
+    # number-words carry no digits, so a figure turned into a word leaves the
+    # guard with nothing to match and it passes. Fluent Tamil narration needs
+    # a Tamil prompt and a dropped-numbers guard -- Slice 3, not this one.
+    if language != "en":
+        return Narration(
+            text=reference,
+            source="template",
+            fallback_reason=f"{language} answers render deterministically; no LLM rewrite",
+        )
+
     result = llm.complete("narrator", system=_load_prompt(), user=reference)
     if not result.ok:
         return Narration(
