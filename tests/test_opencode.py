@@ -259,13 +259,29 @@ def test_provider_status_reports_both_gateways(monkeypatch):
     assert client.provider_status()["opencode-go"] is True
 
 
-def test_tier_defaults_paid_and_rejects_unknown(monkeypatch):
+def test_tier_defaults_paid_when_unset(monkeypatch):
     _env_off(monkeypatch)
     assert client.tier() == "paid"
-    monkeypatch.setenv("ORCA_TIER", "ludicrous")
+    monkeypatch.setenv("ORCA_TIER", "")
     assert client.tier() == "paid"
     monkeypatch.setenv("ORCA_TIER", "FAST")
     assert client.tier() == "fast"
+
+
+def test_unreadable_tier_falls_back_to_free_never_paid(monkeypatch):
+    """A typo is a misconfiguration, and misconfiguration must not escalate.
+
+    Unset means the operator chose nothing, so we land on the strongest
+    chain. An unrecognised value means someone tried to say something we
+    could not read -- that drops to the keyless chain, never up onto the
+    paid one.
+    """
+    _env_off(monkeypatch)
+    monkeypatch.setenv("ORCA_TIER", "ludicrous")
+    assert client.tier() == "free"
+    monkeypatch.setenv("ORCA_TIER", "padi")
+    assert client.tier() == "free"
+    assert client.tier_source() == "default"
 
 
 def test_fast_tier_leads_with_grok_on_go(monkeypatch):

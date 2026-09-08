@@ -3,10 +3,13 @@
 One line each: decision, date, rationale. New entries go on top with a date.
 Reversing one requires updating the code it cites, not just this file.
 
-- **2026-09-08 — Default tier is paid (strongest).** Restarts kept
-  landing on the quota-thin free chain; the compiled fallback is now
-  paid, and this machine pins `ORCA_TIER=paid`. Fresh clones with no
-  keys behave identically (all providers fast-fail to template).
+- **2026-09-08 — Default tier is paid (strongest); an unreadable one is
+  free.** Restarts kept landing on the quota-thin free chain; the compiled
+  fallback is now paid, and this machine pins `ORCA_TIER=paid`. Fresh clones
+  with no keys behave identically (all providers fast-fail to template).
+  *Unset* and *unreadable* are deliberately not the same: a typo'd
+  `ORCA_TIER` drops to the keyless free chain, because a misconfiguration
+  must never escalate onto the paid one.
   (`orchestrator/llm/client.py`)
 
 - **2026-09-08 — Shelter-only routing; zero-length legs fail.** Shelter

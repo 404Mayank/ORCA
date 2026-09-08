@@ -67,6 +67,13 @@ def _models() -> dict:
 
 _TIERS = ("free", "fast", "paid")
 
+# Nothing set: land on the strongest chain, because restarts kept dropping
+# onto the quota-thin free pool. An *unreadable* ORCA_TIER is different --
+# a typo is a misconfiguration, and misconfiguration drops to the keyless
+# chain rather than escalating onto the paid one.
+_DEFAULT_TIER = "paid"
+_UNREADABLE_TIER = "free"
+
 # Runtime override set by POST /settings. None means the environment wins.
 # Kept in-process on purpose: the venue demo runs one uvicorn, and a tier
 # switch that required a restart would never be used. A process restart
@@ -78,13 +85,16 @@ def tier() -> str:
     """Active model tier: the app override when set, else ORCA_TIER."""
     if _TIER_OVERRIDE in _TIERS:
         return _TIER_OVERRIDE
-    name = os.environ.get("ORCA_TIER", "paid").strip().lower()
-    return name if name in _TIERS else "paid"
+    name = os.environ.get("ORCA_TIER", "").strip().lower()
+    if not name:
+        return _DEFAULT_TIER
+    return name if name in _TIERS else _UNREADABLE_TIER
 
 
 def tier_source() -> str:
     """Where the active tier came from: "app" (POST /settings), "env"
-    (ORCA_TIER is set), or "default" (neither -- the compiled fallback)."""
+    (ORCA_TIER is set to a tier we recognise), or "default" (neither -- the
+    compiled fallback, which is also where an unreadable ORCA_TIER lands)."""
     if _TIER_OVERRIDE in _TIERS:
         return "app"
     if os.environ.get("ORCA_TIER", "").strip().lower() in _TIERS:
